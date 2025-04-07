@@ -1,11 +1,7 @@
-from datamodel import OrderDepth, UserId, TradingState, Order
+from datamodel import Listing, Observation, Order, OrderDepth, ProsperityEncoder, Symbol, Trade, TradingState
 from typing import List, Any
 import string
 import json
-
-from datamodel import Listing, Observation, Order, OrderDepth, ProsperityEncoder, Symbol, Trade, TradingState
-
-
 
 class Logger:
     def __init__(self) -> None:
@@ -123,37 +119,105 @@ class Logger:
 
 logger = Logger()
 
-
+RR = "RAINFOREST_RESIN"
 
 class Trader:
+
+    def market_take(self, product: str, bid_price_limit: int, ask_price_limit: int, position: int, limit: int, order_depth: OrderDepth, orders: list[Order]):
+        # make a list of every trade you can take.
+        logger.print("Executing Market Take on " + product)
+        num_buy = 0
+        num_sell = 0
+
+        for i in range(len(order_depth.buy_orders)):
+            bid_price, bid_vol = list(order_depth.buy_orders.items())[i]
+            if bid_price > bid_price_limit: 
+                # sell as many as possible here
+                sell_vol = min(limit + position - num_sell, bid_vol)
+
+                if sell_vol == 0:
+                    break
+
+                logger.print(f"Market take: selling {sell_vol}@{bid_price}\n")
+                orders.append(Order(product, bid_price, -sell_vol))
+                num_sell += sell_vol
+            
+            if position - num_sell <= -limit:
+                break
+
+        for i in range(len(order_depth.sell_orders)):
+            ask_price, ask_vol = list(order_depth.sell_orders.items())[i]
+            ask_vol *= -1
+            if ask_price < ask_price_limit:
+                buy_vol = min(limit - position - num_buy, ask_vol)
+                if buy_vol == 0:
+                    break
+                logger.print(f"Market take: buying {buy_vol}@{ask_price}\n")
+                orders.append(Order(product, ask_price, buy_vol))
+                num_buy += buy_vol
+            
+            if position + num_buy >= limit:
+                break
+
+        # can try interleaving the orders to get more matches?
+        # wait nvm, only one of buy/sell can exist l o l
+        return num_buy, num_sell
+    
+
+    def neutralize(self, product: str, fair_val: int, position: int, num_buy: int, num_sell: int, limit: int, order_depth: OrderDepth, orders: list[Order]):
+        logger.print("Neutralizing position on " + product)
+        new_position = position + num_buy - num_sell
+        if new_position > 0:
+            if len(order_depth.buy_orders) > 0:
+                best_bid_price, best_bid_vol = list(order_depth.buy_orders.items())[0]
+                if best_bid_price >= fair_val:
+                    sell_vol = min(min(new_position, best_bid_vol), limit + new_position - num_sell) # additional param of new_position to get to net neutral
+                    logger.print(f"Neutralized {new_position} to {new_position - sell_vol} at {best_bid_price}\n")
+                    orders.append(Order(product, best_bid_price, -sell_vol))
+
+        elif new_position < 0:
+            if len(order_depth.sell_orders) > 0:
+                best_ask_price, best_ask_vol = list(order_depth.sell_orders.items())[0] # maybe turn into loop to keep checking other sell orders?
+                if best_ask_price <= fair_val:
+                    buy_vol = min(min(-new_position, -best_ask_vol), limit - position - num_buy)
+                    logger.print(f"Neutralized {new_position} to {new_position + buy_vol} at {best_ask_price}")
+                    orders.append(Order(product, best_ask_price, buy_vol))
+
+
+    
+    def executor(self, order_depth: OrderDepth, product: str, position: int): # add product to execute set of strategies
+        traderData = product
+        orders: List[Order] = []
+
+        POS_LIMIT = {"KELP": 50, RR: 50}
+        RR_fair_val = 10000
+
+        if product == RR:
+            logger.print("Executing RR Strategy")
+            nbuy, nsell = self.market_take(product, RR_fair_val - 1, RR_fair_val + 1, position, POS_LIMIT[product], order_depth, orders)
+            logger.print("Market taking done.")
+            self.neutralize(product, RR_fair_val, position, nbuy, nsell, POS_LIMIT[product], order_depth, orders)
+            logger.print("RR Strategy done.")
+
+        
+        return orders, traderData
+
+
     def run(self, state: TradingState):
         # Only method required. It takes all buy and sell orders for all symbols as an input, and outputs a list of orders to be sent
         logger.print("traderData: " + state.traderData)
         logger.print("Observations: " + str(state.observations))
+
         result = {}
+
+        traderData = "ITERATION"
+
         for product in state.order_depths:
             order_depth: OrderDepth = state.order_depths[product]
-            orders: List[Order] = []
-            acceptable_price = 10;  # Participant should calculate this value
-            print("Acceptable price : " + str(acceptable_price))
-            print("Buy Order depth : " + str(len(order_depth.buy_orders)) + ", Sell order depth : " + str(len(order_depth.sell_orders)))
-    
-            if len(order_depth.sell_orders) != 0:
-                best_ask, best_ask_amount = list(order_depth.sell_orders.items())[0]
-                if int(best_ask) < acceptable_price:
-                    print("BUY", str(-best_ask_amount) + "x", best_ask)
-                    orders.append(Order(product, best_ask, -best_ask_amount))
-    
-            if len(order_depth.buy_orders) != 0:
-                best_bid, best_bid_amount = list(order_depth.buy_orders.items())[0]
-                if int(best_bid) > acceptable_price:
-                    print("SELL", str(best_bid_amount) + "x", best_bid)
-                    orders.append(Order(product, best_bid, -best_bid_amount))
-            
-            result[product] = orders
-    
-    
-        traderData = "SAMPLE" # String value holding Trader state data required. It will be delivered as TradingState.traderData on next execution.
+            position = state.position[product] if product in state.position else 0
+
+            result[product], data_prod = self.executor(order_depth, product, position)
+            traderData = traderData + "\n" + data_prod           
         
         conversions = 1
         logger.flush(state, result, conversions, traderData)
