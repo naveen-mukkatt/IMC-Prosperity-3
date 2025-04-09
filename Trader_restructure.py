@@ -2,6 +2,7 @@ from datamodel import Listing, Observation, Order, OrderDepth, ProsperityEncoder
 from typing import List, Any
 import string
 import json
+from abc import ABC, abstractmethod
 
 class Logger:
     def __init__(self) -> None:
@@ -115,18 +116,37 @@ class Logger:
             return value
 
         return value[: max_length - 3] + "..."
-
-
 logger = Logger()
 
-RR = "RAINFOREST_RESIN"
 
-class Trader:       
+class Product():
+    def __init__(self, symbol: str, limit: int, position: int, state: TradingState):
+        self.traderData = state.traderData
+        self.timestamp = state.timestamp
+        self.listings = state.listings
+        self.order_depth = state.order_depths[symbol]
+        self.own_trades = state.own_trades
+        self.market_trades = state.market_trades
+        self.position = state.position
+        self.observations = state.observations
+        self.symbol = symbol
+        self.limit = limit
+        self.position = position
+        self.fair_value = 0
+        self.bid_price_limit = 0
+        self.ask_price_limit = 0
+        self.orders: List[Order] = []
+    
+    def max_buy_orders(self, nbuy: int, position: int):
+        return self.limit - position - nbuy
+    
+    def max_sell_orders(self, limit: int, nsell: int, position: int):
+        return limit + position - nsell
+
+           
     def market_take(self, product: str, bid_price_limit: int, ask_price_limit: int, position: int, limit: int, order_depth: OrderDepth, orders: list[Order]):
-        # make a list of every trade you can take.
-        logger.print("Executing Market Take on " + product)
-        nbuy = 0
-        nsell = 0
+        logger.print("Market Taking:" + product)
+        nbuy, nsell = (0, 0)
 
         for i in range(len(order_depth.buy_orders)):
             bid_price, bid_vol = list(order_depth.buy_orders.items())[i]
@@ -168,12 +188,10 @@ class Trader:
     def neutralize(self, product: str, fair_val: int, position: int, nbuy: int, nsell: int, limit: int, order_depth: OrderDepth, orders: list[Order], aggressive=False):
         logger.print("Neutralizing position on " + product)
         new_position = position + nbuy - nsell
-
-
         if new_position > 0:
             if aggressive:
                 sell_vol = min(new_position, limit - nsell + position)
-                orders.append(Order(product, 10001, -sell_vol))
+                orders.append(Order(product, fair_val + 1, -sell_vol))
                 nsell += sell_vol
             else:
                 if len(order_depth.buy_orders) > 0:
@@ -199,7 +217,7 @@ class Trader:
                         orders.append(Order(product, best_ask_price, buy_vol))
                         nbuy += buy_vol
 
-        return nbuy, nsell
+        return orders, nbuy, nsell
 
     def market_make(
         self,
@@ -245,14 +263,78 @@ class Trader:
             limit,
             orders
         )
-        
+    
+
+
+class Resin(Product):
+    def __init__(self, symbol: str, limit: int, position: int, state: TradingState):
+        super().__init__(symbol, limit, position, state)
+        self.order_depth = state.order_depths[symbol]
+
+    def fair_val(self, state):
+        return 10000
+    
+    def execute(self):
+        orders: List[Order] = []
+        nbuy = 0
+        nsell = 0
+        fv = self.fair_val(self, self.state)
+
+        orders, nbuy, nsell = self.market_take(
+            self.symbol,
+            fv,
+            fv,
+            self.position,
+            self.limit,
+            self.order_depth,
+            orders
+        )
+
+        orders, nbuy, nsell = self.neutralize(
+            self.symbol,
+            fv,
+            self.position,
+            nbuy,
+            nsell,
+            self.limit,
+            self.order_depth,
+            orders,
+            aggressive=False
+        )
+
+        orders, nbuy, nsell = self.market_make_undercut(
+            self.symbol,
+
+        )
+
+
+class Kelp(Product):
+    def __init__(self, symbol: str, limit: int, position: int, state: TradingState):
+        super().__init__(symbol, limit, position, state)
+
+    def calculate_fair_value(self):
+        mm_bid_price, mm_bid_qty = max(self.order_depth.buy_orders.items(), key = lambda x: x[1])
+        mm_ask_price, mm_ask_qty = max(self.order_depth.sell_orders.items(), key = lambda x: x[1])
+        return (mm_bid_price + mm_ask_price)/2
+    
+    def execute(self):
+
+
+
+
+
+RR = "RAINFOREST_RESIN"
+
+
+class Trader:
     def executor(self, order_depth: OrderDepth, product: str, position: int): # add product to execute set of strategies
         traderData = product
         orders: List[Order] = []
 
         POS_LIMIT = {"KELP": 50, RR: 50}
         RR_fair_val = 10000
-        RR_edge = 1
+        kelp_fair_val = int(self.calculate_kelp_val(order_depth, product))
+        RR_edge = 0
 
         if product == RR:
             lim = POS_LIMIT[product]
@@ -261,12 +343,20 @@ class Trader:
             logger.print(f"Market taking done. Nbuy = {nbuy}, Nsell = {nsell}\n")
             nbuy, nsell = self.neutralize(product, RR_fair_val, position, nbuy, nsell, lim, order_depth, orders, aggressive=False)
             logger.print(f"Market neutralization done. Nbuy = {nbuy}, Nsell = {nsell}\n")
-            nbuy, nsell = self.market_make_undercut(product, position, 10000, 1, nbuy, nsell, lim, order_depth, orders)
+            nbuy, nsell = self.market_make_undercut(product, position, RR_fair_val, 1, nbuy, nsell, lim, order_depth, orders)
             logger.print(f"Market making done. Nbuy = {nbuy}, Nsell = {nsell}\n")
             logger.print("RR Strategy done.")
             
-
-        
+        if product == "KELP":
+            lim = POS_LIMIT[product]
+            logger.print("Executing Kelp Strategy")
+            nbuy, nsell = self.market_take(product, kelp_fair_val, kelp_fair_val, position, lim, order_depth, orders)
+            logger.print(f"Market taking done. Nbuy = {nbuy}, Nsell = {nsell}\n")
+            nbuy, nsell = self.neutralize(product, kelp_fair_val, position, nbuy, nsell, lim, order_depth, orders, aggressive=False)
+            logger.print(f"Market neutralization done. Nbuy = {nbuy}, Nsell = {nsell}\n")
+            nbuy, nsell = self.market_make_undercut(product, position, kelp_fair_val, 1, nbuy, nsell, lim, order_depth, orders)
+            logger.print(f"Market making done. Nbuy = {nbuy}, Nsell = {nsell}\n")
+            logger.print("RR Strategy done.")
         return orders, traderData
 
 

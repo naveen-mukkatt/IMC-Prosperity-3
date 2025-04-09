@@ -207,17 +207,11 @@ class Trader:
         position: int, 
         buy_price: int, sell_price: int,
         nbuy: int, nsell: int, 
-        limit: int, 
-        order_depth: OrderDepth, 
-        orders: list[Order], 
-        slight_undercut: bool=True, 
-        bid_target=9999, ask_target=10001
+        limit: int,
+        orders: list[Order]
     ):
         logger.print("Starting MM Algorithm: " + product)
 
-        if slight_undercut:    
-            ...
-        
         buy_qty = limit - (position + nbuy)
         sell_qty = limit - (nsell - position)
 
@@ -238,20 +232,36 @@ class Trader:
         nbuy: int, nsell: int, 
         limit: int, 
         order_depth: OrderDepth, 
-        orders: list[Order], 
-        slight_undercut: bool=True,
+        orders: list[Order]
     ):
         mm_buy = max([bid for bid in order_depth.buy_orders.keys() if bid < fair_val - edge], default=fair_val - edge - 1) + 1
         mm_sell = min([ask for ask in order_depth.sell_orders.keys() if ask > fair_val + edge], default=fair_val + edge + 1) - 1
-        
+
+        return self.market_make(
+            product,
+            position,
+            mm_buy, mm_sell, 
+            nbuy, nsell,
+            limit,
+            orders
+        )
+    
+
+    def calculate_kelp_val(self, order_depth: OrderDepth, product: str):
+        # Identify MM 
+        mm_bid_price, mm_bid_qty = max(order_depth.buy_orders.items(), key = lambda x: x[1])
+        mm_ask_price, mm_ask_qty = max(order_depth.sell_orders.items(), key = lambda x: x[1])
+
+        return (mm_bid_price + mm_ask_price)/2
+
     def executor(self, order_depth: OrderDepth, product: str, position: int): # add product to execute set of strategies
         traderData = product
         orders: List[Order] = []
 
         POS_LIMIT = {"KELP": 50, RR: 50}
         RR_fair_val = 10000
-        RR_bid_edge = 1
-        RR_ask_edge = 1
+        kelp_fair_val = int(self.calculate_kelp_val(order_depth, product))
+        RR_edge = 0
 
         if product == RR:
             lim = POS_LIMIT[product]
@@ -260,12 +270,20 @@ class Trader:
             logger.print(f"Market taking done. Nbuy = {nbuy}, Nsell = {nsell}\n")
             nbuy, nsell = self.neutralize(product, RR_fair_val, position, nbuy, nsell, lim, order_depth, orders, aggressive=False)
             logger.print(f"Market neutralization done. Nbuy = {nbuy}, Nsell = {nsell}\n")
-            nbuy, nsell = self.market_make(product, RR_fair_val, position, RR_bid_edge, RR_ask_edge, nbuy, nsell, lim, order_depth, orders, slight_undercut=True, bid_target=9998, ask_target=10002)
+            nbuy, nsell = self.market_make_undercut(product, position, RR_fair_val, 1, nbuy, nsell, lim, order_depth, orders)
             logger.print(f"Market making done. Nbuy = {nbuy}, Nsell = {nsell}\n")
             logger.print("RR Strategy done.")
             
-
-        
+        if product == "KELP":
+            lim = POS_LIMIT[product]
+            logger.print("Executing Kelp Strategy")
+            nbuy, nsell = self.market_take(product, kelp_fair_val, kelp_fair_val, position, lim, order_depth, orders)
+            logger.print(f"Market taking done. Nbuy = {nbuy}, Nsell = {nsell}\n")
+            nbuy, nsell = self.neutralize(product, kelp_fair_val, position, nbuy, nsell, lim, order_depth, orders, aggressive=False)
+            logger.print(f"Market neutralization done. Nbuy = {nbuy}, Nsell = {nsell}\n")
+            nbuy, nsell = self.market_make_undercut(product, position, kelp_fair_val, 1, nbuy, nsell, lim, order_depth, orders)
+            logger.print(f"Market making done. Nbuy = {nbuy}, Nsell = {nsell}\n")
+            logger.print("RR Strategy done.")
         return orders, traderData
 
 
@@ -278,12 +296,12 @@ class Trader:
 
         traderData = "ITERATION"
 
-        #for product in state.order_depths:
-        #    order_depth: OrderDepth = state.order_depths[product]
-        #    position = state.position[product] if product in state.position else 0
+        for product in state.order_depths:
+            order_depth: OrderDepth = state.order_depths[product]
+            position = state.position[product] if product in state.position else 0
 
-        #    result[product], data_prod = self.executor(order_depth, product, position)
-        #    traderData = traderData + "\n" + data_prod           
+            result[product], data_prod = self.executor(order_depth, product, position)
+            traderData = traderData + "\n" + data_prod           
         
         conversions = 1
         logger.flush(state, result, conversions, traderData)
