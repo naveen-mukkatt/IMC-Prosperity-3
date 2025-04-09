@@ -1,4 +1,4 @@
-# Best result: 1.9k on IMC test, 51.1k on Jasper Day 1, 
+# Best result: 1.9k on IMC test, 3.5k on Jasper Day 0, 51.1k on Jasper Day 1. (All Resin)
 
 from datamodel import Listing, Observation, Order, OrderDepth, ProsperityEncoder, Symbol, Trade, TradingState
 from typing import List, Any

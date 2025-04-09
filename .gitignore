@@ -1,2 +1,4 @@
 imc_env/
 submissions/
+backtests/
+__pycache__/
