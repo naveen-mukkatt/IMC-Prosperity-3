@@ -120,244 +120,158 @@ logger = Logger()
 
 
 class Product():
-    def __init__(self, symbol: str, limit: int, position: int, state: TradingState):
+    def __init__(self, product: str, limit: int, state: TradingState):
         self.traderData = state.traderData
         self.timestamp = state.timestamp
         self.listings = state.listings
-        self.order_depth = state.order_depths[symbol]
+        self.order_depth = state.order_depths[product]
         self.own_trades = state.own_trades
         self.market_trades = state.market_trades
         self.position = state.position
         self.observations = state.observations
-        self.symbol = symbol
+        self.product = product
         self.limit = limit
-        self.position = position
-        self.fair_value = 0
-        self.bid_price_limit = 0
-        self.ask_price_limit = 0
+        self.position = state.position[product] if product in state.position else 0
+        self.nsell = 0
+        self.nbuy = 0
         self.orders: List[Order] = []
     
-    def max_buy_orders(self, nbuy: int, position: int):
-        return self.limit - position - nbuy
-    
-    def max_sell_orders(self, limit: int, nsell: int, position: int):
-        return limit + position - nsell
-
+    def buy(self, price:int, quantity: int):
+        self.orders.append(Order(self.product, price, quantity))
+        self.nbuy += quantity
+    def sell(self, price: int, quantity: int):
+        self.orders.append(Order(self.product, price, -quantity))
+        self.nsell += quantity
+    def max_buy_orders(self):
+        return self.limit - self.position - self.nbuy 
+    def max_sell_orders(self):
+        return self.limit + self.position - self.nsell
            
-    def market_take(self, product: str, bid_price_limit: int, ask_price_limit: int, position: int, limit: int, order_depth: OrderDepth, orders: list[Order]):
-        logger.print("Market Taking:" + product)
-        nbuy, nsell = (0, 0)
-
-        for i in range(len(order_depth.buy_orders)):
-            bid_price, bid_vol = list(order_depth.buy_orders.items())[i]
-            if bid_price > bid_price_limit: 
-                # sell as many as possible here
-                sell_vol = min(limit + position - nsell, bid_vol)
-
+    def market_take(self, bid_p_lim: int, ask_p_lim: int):
+        logger.print("Market Taking:" + self.product)
+        for i in range(len(self.order_depth.buy_orders)):
+            bid_price, bid_vol = list(self.order_depth.buy_orders.items())[i]
+            if bid_price > bid_p_lim: 
+                sell_vol = min(self.max_sell_orders(), bid_vol)
                 if sell_vol == 0:
                     break
 
                 logger.print(f"Market take: selling {sell_vol}@{bid_price}\n")
-                orders.append(Order(product, bid_price, -sell_vol))
-                nsell += sell_vol
+                self.sell(bid_price, sell_vol)
             
-            if position - nsell <= -limit:
+            if self.position - self.nsell <= -self.limit:
                 break
 
-        for i in range(len(order_depth.sell_orders)):
-            ask_price, ask_vol = list(order_depth.sell_orders.items())[i]
+        for i in range(len(self.order_depth.sell_orders)):
+            ask_price, ask_vol = list(self.order_depth.sell_orders.items())[i]
             ask_vol *= -1
-            if ask_price < ask_price_limit:
-                buy_vol = min(limit - position - nbuy, ask_vol)
+            if ask_price < ask_p_lim:
+                buy_vol = min(self.max_buy_orders(), ask_vol)
                 if buy_vol == 0:
                     break
                 logger.print(f"Market take: buying {buy_vol}@{ask_price}\n")
-                orders.append(Order(product, ask_price, buy_vol))
-                nbuy += buy_vol
+                self.buy(ask_price, buy_vol)
             
-            if position + nbuy >= limit:
+            if self.position + self.nbuy >= self.limit:
                 break
 
-        # can try interleaving the orders to get more matches?
-        # wait nvm, only one of buy/sell can exist l o l
-        return nbuy, nsell
     
-    # TODO: this is doing a horrible job of neutralizing. test out aggression and see how it impacts PnL
-    # current benchmark: 1.9k on Day 1 Resin
-    
-    def neutralize(self, product: str, fair_val: int, position: int, nbuy: int, nsell: int, limit: int, order_depth: OrderDepth, orders: list[Order], aggressive=False):
-        logger.print("Neutralizing position on " + product)
-        new_position = position + nbuy - nsell
+    def neutralize(self, fv: int, agg_up: int, agg_down: int, aggressive=False):
+        logger.print("Neutralizing position on " + self.product)
+        new_position = self.position + self.nbuy - self.nsell
         if new_position > 0:
             if aggressive:
-                sell_vol = min(new_position, limit - nsell + position)
-                orders.append(Order(product, fair_val + 1, -sell_vol))
-                nsell += sell_vol
+                sell_vol = min(new_position, self.max_sell_orders())
+                self.sell(fv + agg_up, sell_vol)
             else:
-                if len(order_depth.buy_orders) > 0:
-                    best_bid_price, best_bid_vol = max(order_depth.buy_orders.items(), key=lambda x: x[0], default=(10000, new_position))
+                if len(self.order_depth.buy_orders) > 0:
+                    best_bid_price, best_bid_vol = max(self.order_depth.buy_orders.items(), key=lambda x: x[0], default=(fv, new_position))
 
-                    if best_bid_price >= fair_val:
-                        sell_vol = min(min(new_position, best_bid_vol), limit + new_position - nsell) # additional param of new_position to get to net neutral
+                    if best_bid_price >= fv:
+                        sell_vol = min(min(new_position, best_bid_vol), self.max_sell_orders) # additional param of new_position to get to net neutral
                         logger.print(f"Neutralizing {new_position} to {new_position - sell_vol} at {best_bid_price}\n")
-                        orders.append(Order(product, best_bid_price, -sell_vol))
-                        nsell += sell_vol
+                        self.sell(best_bid_price, sell_vol)
 
         elif new_position < 0:
             if aggressive: # buy as much as possible to get to 0 without overflowing buy orders
-                buy_vol = min(-new_position, limit - nbuy - position)
-                orders.append(Order(product, 9999, buy_vol))
-                nbuy += buy_vol
+                buy_vol = min(-new_position, self.max_buy_orders())
+                self.buy(fv - agg_down, buy_vol)
             else:
-                if len(order_depth.sell_orders) > 0:
-                    best_ask_price, best_ask_vol = max(order_depth.sell_orders.items(), key = lambda x: x[0], default=(10000, new_position))
-                    if best_ask_price <= fair_val:
-                        buy_vol = min(min(-new_position, -best_ask_vol), limit - new_position - nbuy)
+                if len(self.order_depth.sell_orders) > 0:
+                    best_ask_price, best_ask_vol = max(self.order_depth.sell_orders.items(), key = lambda x: x[0], default=(fv, new_position))
+                    if best_ask_price <= fv:
+                        buy_vol = min(min(-new_position, -best_ask_vol), self.max_sell_orders())
                         logger.print(f"Neutralizing {new_position} to {new_position + buy_vol} at {best_ask_price}")
-                        orders.append(Order(product, best_ask_price, buy_vol))
-                        nbuy += buy_vol
+                        self.buy(best_ask_price, buy_vol)
 
-        return orders, nbuy, nsell
 
     def market_make(
         self,
-        product: str,
-        position: int, 
-        buy_price: int, sell_price: int,
-        nbuy: int, nsell: int, 
-        limit: int,
-        orders: list[Order]
+        buy_price: int,
+        sell_price: int
     ):
-        logger.print("Starting MM Algorithm: " + product)
-
-        buy_qty = limit - (position + nbuy)
-        sell_qty = limit - (nsell - position)
-
-        orders.append(Order(product, buy_price, buy_qty))
-        orders.append(Order(product, sell_price, -sell_qty))
-
-        nbuy += buy_qty
-        nsell += sell_qty
-
-        return nbuy, nsell
+        self.buy(buy_price, self.max_buy_orders())
+        self.sell(sell_price, self.max_sell_orders())
     
     def market_make_undercut(
         self,
-        product: str,
-        position: int, 
         fair_val: int,
         edge: float,
-        nbuy: int, nsell: int, 
-        limit: int, 
-        order_depth: OrderDepth, 
-        orders: list[Order]
     ):
-        mm_buy = max([bid for bid in order_depth.buy_orders.keys() if bid < fair_val - edge], default=fair_val - edge - 1) + 1
-        mm_sell = min([ask for ask in order_depth.sell_orders.keys() if ask > fair_val + edge], default=fair_val + edge + 1) - 1
+        mm_buy = max([bid for bid in self.order_depth.buy_orders.keys() if bid < fair_val - edge], default=fair_val - edge - 1) + 1
+        mm_sell = min([ask for ask in self.order_depth.sell_orders.keys() if ask > fair_val + edge], default=fair_val + edge + 1) - 1
 
-        return self.market_make(
-            product,
-            position,
-            mm_buy, mm_sell, 
-            nbuy, nsell,
-            limit,
-            orders
-        )
+        return self.market_make(mm_buy, mm_sell)
     
+    def strategy(self): # RUNTIME POLYMORPHISM BTW
+        raise NotImplementedError()
+        ...
 
+    def execute(self): 
+        self.strategy()
+        return self.orders, self.traderData
 
 class Resin(Product):
-    def __init__(self, symbol: str, limit: int, position: int, state: TradingState):
-        super().__init__(symbol, limit, position, state)
-        self.order_depth = state.order_depths[symbol]
+    def __init__(self, symbol: str, limit: int, state: TradingState):
+        super().__init__(symbol, limit, state)
 
-    def fair_val(self, state):
+    def fair_val(self):
         return 10000
     
-    def execute(self):
-        orders: List[Order] = []
-        nbuy = 0
-        nsell = 0
-        fv = self.fair_val(self, self.state)
-
-        orders, nbuy, nsell = self.market_take(
-            self.symbol,
-            fv,
-            fv,
-            self.position,
-            self.limit,
-            self.order_depth,
-            orders
-        )
-
-        orders, nbuy, nsell = self.neutralize(
-            self.symbol,
-            fv,
-            self.position,
-            nbuy,
-            nsell,
-            self.limit,
-            self.order_depth,
-            orders,
-            aggressive=False
-        )
-
-        orders, nbuy, nsell = self.market_make_undercut(
-            self.symbol,
-
-        )
+    def strategy(self):
+        fv = self.fair_val()
+        self.market_take(fv, fv)
+        self.neutralize(fv, 1, 1, False)
+        self.market_make_undercut(fv, 1)
 
 
 class Kelp(Product):
-    def __init__(self, symbol: str, limit: int, position: int, state: TradingState):
-        super().__init__(symbol, limit, position, state)
+    def __init__(self, symbol: str, limit: int, state: TradingState):
+        super().__init__(symbol, limit, state)
 
-    def calculate_fair_value(self):
+    def fair_val(self):
         mm_bid_price, mm_bid_qty = max(self.order_depth.buy_orders.items(), key = lambda x: x[1])
         mm_ask_price, mm_ask_qty = max(self.order_depth.sell_orders.items(), key = lambda x: x[1])
         return (mm_bid_price + mm_ask_price)/2
     
-    def execute(self):
+    def strategy(self):
+        fv = self.fair_val()
+        self.market_take(fv, fv)
+        self.neutralize(fv, 1, 1, False)
+        self.market_make_undercut(fv, 1)
 
-
-
-
-
-RR = "RAINFOREST_RESIN"
 
 
 class Trader:
-    def executor(self, order_depth: OrderDepth, product: str, position: int): # add product to execute set of strategies
-        traderData = product
-        orders: List[Order] = []
+    def executor(self, product: str, state: TradingState): # add product to execute set of strategies
 
-        POS_LIMIT = {"KELP": 50, RR: 50}
-        RR_fair_val = 10000
-        kelp_fair_val = int(self.calculate_kelp_val(order_depth, product))
-        RR_edge = 0
-
-        if product == RR:
-            lim = POS_LIMIT[product]
-            logger.print("Executing RR Strategy")
-            nbuy, nsell = self.market_take(product, RR_fair_val, RR_fair_val, position, lim, order_depth, orders)
-            logger.print(f"Market taking done. Nbuy = {nbuy}, Nsell = {nsell}\n")
-            nbuy, nsell = self.neutralize(product, RR_fair_val, position, nbuy, nsell, lim, order_depth, orders, aggressive=False)
-            logger.print(f"Market neutralization done. Nbuy = {nbuy}, Nsell = {nsell}\n")
-            nbuy, nsell = self.market_make_undercut(product, position, RR_fair_val, 1, nbuy, nsell, lim, order_depth, orders)
-            logger.print(f"Market making done. Nbuy = {nbuy}, Nsell = {nsell}\n")
-            logger.print("RR Strategy done.")
+        if product == "RAINFOREST_RESIN":
+            resin = Resin(product, 50, state)
+            return resin.execute()
             
         if product == "KELP":
-            lim = POS_LIMIT[product]
-            logger.print("Executing Kelp Strategy")
-            nbuy, nsell = self.market_take(product, kelp_fair_val, kelp_fair_val, position, lim, order_depth, orders)
-            logger.print(f"Market taking done. Nbuy = {nbuy}, Nsell = {nsell}\n")
-            nbuy, nsell = self.neutralize(product, kelp_fair_val, position, nbuy, nsell, lim, order_depth, orders, aggressive=False)
-            logger.print(f"Market neutralization done. Nbuy = {nbuy}, Nsell = {nsell}\n")
-            nbuy, nsell = self.market_make_undercut(product, position, kelp_fair_val, 1, nbuy, nsell, lim, order_depth, orders)
-            logger.print(f"Market making done. Nbuy = {nbuy}, Nsell = {nsell}\n")
-            logger.print("RR Strategy done.")
-        return orders, traderData
+            kelp = Kelp(product, 50, state)
+            return kelp.execute()
 
 
     def run(self, state: TradingState):
@@ -367,13 +281,11 @@ class Trader:
 
         result = {}
 
-        traderData = "ITERATION"
-
+        traderData = ""
         for product in state.order_depths:
-            order_depth: OrderDepth = state.order_depths[product]
             position = state.position[product] if product in state.position else 0
 
-            result[product], data_prod = self.executor(order_depth, product, position)
+            result[product], data_prod = self.executor(product, state)
             traderData = traderData + "\n" + data_prod           
         
         conversions = 1
