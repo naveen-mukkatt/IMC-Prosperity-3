@@ -173,7 +173,7 @@ class Trader:
         if new_position > 0:
             if aggressive:
                 sell_vol = min(new_position, limit - nsell + position)
-                orders.append(Order(product, 10001, -sell_vol))
+                orders.append(Order(product, fair_val + 1, -sell_vol))
                 nsell += sell_vol
             else:
                 if len(order_depth.buy_orders) > 0:
@@ -188,7 +188,7 @@ class Trader:
         elif new_position < 0:
             if aggressive: # buy as much as possible to get to 0 without overflowing buy orders
                 buy_vol = min(-new_position, limit - nbuy - position)
-                orders.append(Order(product, 9999, buy_vol))
+                orders.append(Order(product, fair_val - 1, buy_vol))
                 nbuy += buy_vol
             else:
                 if len(order_depth.sell_orders) > 0:
