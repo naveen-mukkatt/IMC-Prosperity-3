@@ -207,8 +207,7 @@ class Trader:
         return nbuy, nsell
 
 
-    def executor(self, order_depth: OrderDepth, product: str, position: int): # add product to execute set of strategies
-        traderData = product
+    def executor(self, order_depth: OrderDepth, product: str, position: int, traderData: str): # add product to execute set of strategies
         orders: List[Order] = []
 
         POS_LIMIT = {"KELP": 50, RR: 50}
@@ -239,13 +238,13 @@ class Trader:
 
         result = {}
 
-        traderData = "ITERATION"
+        traderData = ""
 
         for product in state.order_depths:
             order_depth: OrderDepth = state.order_depths[product]
             position = state.position[product] if product in state.position else 0
 
-            result[product], data_prod = self.executor(order_depth, product, position)
+            result[product], data_prod = self.executor(order_depth, product, position, traderData)
             traderData = traderData + "\n" + data_prod           
         
         conversions = 1
