@@ -1,5 +1,5 @@
 imc_env/
 submissions/
-__pycache__/
 backtests/
-.python-version
+__pycache__/
+submissions/

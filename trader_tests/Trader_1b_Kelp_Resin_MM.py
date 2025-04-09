@@ -115,9 +115,13 @@ class Logger:
             return value
 
         return value[: max_length - 3] + "..."
-
-
 logger = Logger()
+
+# product must have a symbol
+# when run() is called, it will look for 
+class Product:
+    def __init__():
+        ...
 
 RR = "RAINFOREST_RESIN"
 
@@ -168,8 +172,6 @@ class Trader:
     def neutralize(self, product: str, fair_val: int, position: int, nbuy: int, nsell: int, limit: int, order_depth: OrderDepth, orders: list[Order], aggressive=False):
         logger.print("Neutralizing position on " + product)
         new_position = position + nbuy - nsell
-
-
         if new_position > 0:
             if aggressive:
                 sell_vol = min(new_position, limit - nsell + position)
@@ -188,7 +190,7 @@ class Trader:
         elif new_position < 0:
             if aggressive: # buy as much as possible to get to 0 without overflowing buy orders
                 buy_vol = min(-new_position, limit - nbuy - position)
-                orders.append(Order(product, fair_val - 1, buy_vol))
+                orders.append(Order(product, 9999, buy_vol))
                 nbuy += buy_vol
             else:
                 if len(order_depth.sell_orders) > 0:
@@ -245,14 +247,23 @@ class Trader:
             limit,
             orders
         )
-        
+    
+
+    def calculate_kelp_val(self, order_depth: OrderDepth, product: str):
+        # Identify MM 
+        mm_bid_price, mm_bid_qty = max(order_depth.buy_orders.items(), key = lambda x: x[1])
+        mm_ask_price, mm_ask_qty = max(order_depth.sell_orders.items(), key = lambda x: x[1])
+
+        return (mm_bid_price + mm_ask_price)/2
+
     def executor(self, order_depth: OrderDepth, product: str, position: int): # add product to execute set of strategies
         traderData = product
         orders: List[Order] = []
 
         POS_LIMIT = {"KELP": 50, RR: 50}
         RR_fair_val = 10000
-        RR_edge = 1
+        kelp_fair_val = int(self.calculate_kelp_val(order_depth, product))
+        RR_edge = 0
 
         if product == RR:
             lim = POS_LIMIT[product]
@@ -261,12 +272,20 @@ class Trader:
             logger.print(f"Market taking done. Nbuy = {nbuy}, Nsell = {nsell}\n")
             nbuy, nsell = self.neutralize(product, RR_fair_val, position, nbuy, nsell, lim, order_depth, orders, aggressive=False)
             logger.print(f"Market neutralization done. Nbuy = {nbuy}, Nsell = {nsell}\n")
-            nbuy, nsell = self.market_make_undercut(product, position, 10000, 1, nbuy, nsell, lim, order_depth, orders)
+            nbuy, nsell = self.market_make_undercut(product, position, RR_fair_val, 1, nbuy, nsell, lim, order_depth, orders)
             logger.print(f"Market making done. Nbuy = {nbuy}, Nsell = {nsell}\n")
             logger.print("RR Strategy done.")
             
-
-        
+        if product == "KELP":
+            lim = POS_LIMIT[product]
+            logger.print("Executing Kelp Strategy")
+            nbuy, nsell = self.market_take(product, kelp_fair_val, kelp_fair_val, position, lim, order_depth, orders)
+            logger.print(f"Market taking done. Nbuy = {nbuy}, Nsell = {nsell}\n")
+            nbuy, nsell = self.neutralize(product, kelp_fair_val, position, nbuy, nsell, lim, order_depth, orders, aggressive=False)
+            logger.print(f"Market neutralization done. Nbuy = {nbuy}, Nsell = {nsell}\n")
+            nbuy, nsell = self.market_make_undercut(product, position, kelp_fair_val, 1, nbuy, nsell, lim, order_depth, orders)
+            logger.print(f"Market making done. Nbuy = {nbuy}, Nsell = {nsell}\n")
+            logger.print("RR Strategy done.")
         return orders, traderData
 
 
