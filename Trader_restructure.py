@@ -136,11 +136,11 @@ class Product():
         self.nbuy = 0
         self.orders: List[Order] = []
     
-    def buy(self, price:int, quantity: int):
-        self.orders.append(Order(self.product, price, quantity))
+    def buy(self, price: int, quantity: int):
+        self.orders.append(Order(self.product, int(price), quantity))
         self.nbuy += quantity
     def sell(self, price: int, quantity: int):
-        self.orders.append(Order(self.product, price, -quantity))
+        self.orders.append(Order(self.product, int(price), -quantity))
         self.nsell += quantity
     def max_buy_orders(self):
         return self.limit - self.position - self.nbuy 
@@ -148,7 +148,7 @@ class Product():
         return self.limit + self.position - self.nsell
            
     def market_take(self, bid_p_lim: int, ask_p_lim: int):
-        logger.print("Market Taking:" + self.product)
+        logger.print("Market Taking:")
         for i in range(len(self.order_depth.buy_orders)):
             bid_price, bid_vol = list(self.order_depth.buy_orders.items())[i]
             if bid_price > bid_p_lim: 
@@ -177,7 +177,7 @@ class Product():
 
     
     def neutralize(self, fv: int, agg_up: int, agg_down: int, aggressive=False):
-        logger.print("Neutralizing position on " + self.product)
+        logger.print("Neutralizing position")
         new_position = self.position + self.nbuy - self.nsell
         if new_position > 0:
             if aggressive:
@@ -188,7 +188,7 @@ class Product():
                     best_bid_price, best_bid_vol = max(self.order_depth.buy_orders.items(), key=lambda x: x[0], default=(fv, new_position))
 
                     if best_bid_price >= fv:
-                        sell_vol = min(min(new_position, best_bid_vol), self.max_sell_orders) # additional param of new_position to get to net neutral
+                        sell_vol = min(min(new_position, best_bid_vol), self.max_sell_orders()) # additional param of new_position to get to net neutral
                         logger.print(f"Neutralizing {new_position} to {new_position - sell_vol} at {best_bid_price}\n")
                         self.sell(best_bid_price, sell_vol)
 
@@ -272,6 +272,10 @@ class Trader:
         if product == "KELP":
             kelp = Kelp(product, 50, state)
             return kelp.execute()
+        
+        if product == "SQUID_INK":
+            orders: List[Order] = []
+            return orders, state.traderData
 
 
     def run(self, state: TradingState):
@@ -285,8 +289,7 @@ class Trader:
         for product in state.order_depths:
             position = state.position[product] if product in state.position else 0
 
-            result[product], data_prod = self.executor(product, state)
-            traderData = traderData + "\n" + data_prod           
+            result[product], data_prod = self.executor(product, state)          
         
         conversions = 1
         logger.flush(state, result, conversions, traderData)
