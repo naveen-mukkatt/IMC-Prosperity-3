@@ -251,7 +251,7 @@ class Kelp(Product):
 
     def fair_val(self):
         mm_bid_price, mm_bid_qty = max(self.order_depth.buy_orders.items(), key = lambda x: x[1])
-        mm_ask_price, mm_ask_qty = min(self.order_depth.sell_orders.items(), key = lambda x: x[1])
+        mm_ask_price, mm_ask_qty = max(self.order_depth.sell_orders.items(), key = lambda x: x[1])
         return (mm_bid_price + mm_ask_price)/2
     
     def strategy(self):
@@ -266,11 +266,11 @@ class Ink(Product):
         self.state = state
 
     def fair_val(self):
-        mm_bid_price, mm_bid_qty = max(self.order_depth.buy_orders.items(), key = lambda x: x[1])
-        mm_ask_price, mm_ask_qty = min(self.order_depth.sell_orders.items(), key = lambda x: x[1])
+        mm_bid_price, mm_bid_qty = max(self.order_depth.buy_orders.items(), key = lambda x: x[0])
+        mm_ask_price, mm_ask_qty = min(self.order_depth.sell_orders.items(), key = lambda x: x[0])
         
         mid = (mm_bid_price + mm_ask_price)/2
-        prev_mid = self.state.traderData.split(" ")[-1]
+        prev_mid = self.state.traderData#.split(" ")[-1]
         if prev_mid == "":
             prev_mid = mid
 
@@ -284,7 +284,6 @@ class Ink(Product):
         self.market_take(fv, fv)
         self.neutralize(fv, 1, 1, True)
         self.market_make_undercut(fv, 2)
-
 
 class Trader:
     def executor(self, product: str, state: TradingState): # add product to execute set of strategies
@@ -300,8 +299,7 @@ class Trader:
         if product == "SQUID_INK":
             ink = Ink(product, 50, state)
             return ink.execute()
-
-
+        
     def run(self, state: TradingState):
         # Only method required. It takes all buy and sell orders for all symbols as an input, and outputs a list of orders to be sent
         logger.print("traderData: " + state.traderData)
