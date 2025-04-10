@@ -1,7 +1,6 @@
 from datamodel import Listing, Observation, Order, OrderDepth, ProsperityEncoder, Symbol, Trade, TradingState
 from typing import List, Any
-import string
-import json
+import string, json, math, os
 from abc import ABC, abstractmethod
 
 class Logger:
@@ -136,30 +135,48 @@ class Product():
         self.nbuy = 0
         self.orders: List[Order] = []
     
-    def buy(self, price: int, quantity: int):
+    def buy(self, price: int, quantity: int, update: bool=False):
+        """Appends an order to buy shares at the desired price and quantity. Updates orderbook to satisfy order if update=True."""
+        # logger.print(f"Buying {quantity}@{price}")
         if quantity > 0:
             self.orders.append(Order(self.product, int(price), quantity))
             self.nbuy += quantity
-    def sell(self, price: int, quantity: int):
+            if update:
+                if price in self.order_depth.buy_orders.keys():
+                    self.order_depth.buy_orders[price] -= quantity
+                    if self.order_depth.buy_orders[price] == 0:
+                        del self.order_depth.buy_orders[price]
+                else:
+                    logger.print(f"Price={price} not found.")
+    def sell(self, price: int, quantity: int, update: bool=False):
+        """Appends an order to sell shares at the desired price and quantity. Updates orderbook to satisfy order if update=True."""
+        #logger.print(f"Selling {quantity}@{price}")
         if quantity > 0:
             self.orders.append(Order(self.product, int(price), -quantity))
             self.nsell += quantity
+            if update:
+                if price in self.order_depth.sell_orders.keys():
+                    self.order_depth[price] -= quantity
+                    if self.order_depth.sell_orders[price] == 0:
+                        del self.order_depth.sell_orders[price]
+                else:
+                    logger.print(f"Price={price} not found.")
     def max_buy_orders(self):
         return self.limit - self.position - self.nbuy 
     def max_sell_orders(self):
         return self.limit + self.position - self.nsell
-           
-    def market_take(self, bid_p_lim: int, ask_p_lim: int):
-        logger.print(f"Market Taking for {self.product}:")
+
+    def market_take(self, bid_p_lim: float, ask_p_lim: float):
+        """Matches all trades where bid > bid_p_lim or ask < ask_p_lim. Removes taken orders from orderbook."""
+        #logger.print(f"Market Taking for {self.product} on {bid_p_lim}/{ask_p_lim}:")
         for i in range(len(self.order_depth.buy_orders)):
             bid_price, bid_vol = list(self.order_depth.buy_orders.items())[i]
             if bid_price > bid_p_lim: 
                 sell_vol = min(self.max_sell_orders(), bid_vol)
                 if sell_vol == 0:
                     break
+                self.sell(bid_price, sell_vol, update=True)
 
-                logger.print(f"Selling {sell_vol}@{bid_price}")
-                self.sell(bid_price, sell_vol)
             
             if self.position - self.nsell <= -self.limit:
                 break
@@ -171,41 +188,35 @@ class Product():
                 buy_vol = min(self.max_buy_orders(), ask_vol)
                 if buy_vol == 0:
                     break
-                logger.print(f"Buying {buy_vol}@{ask_price}")
-                self.buy(ask_price, buy_vol)
+                self.buy(ask_price, buy_vol, update=True)
             
             if self.position + self.nbuy >= self.limit:
                 break
 
-    
-    def neutralize(self, fv: int, agg_up: int, agg_down: int, aggressive=False):
-        logger.print("Running neutralization algorithm:")
+    def neutralize(self, fv: float, edge_up: float, edge_down: float, soft_limit: int):
+        """
+        Attempts to zero our position.
+        Liquidates at fair value until under soft limit. Liquidates at fair value + edge until 0.
+        Restricted by max_buy_orders().
+        """
+        #logger.print("Running neutralization algorithm:")
         new_position = self.position + self.nbuy - self.nsell
         if new_position > 0:
-            if aggressive:
-                sell_vol = min(new_position, self.max_sell_orders())
-                self.sell(fv + agg_up, sell_vol)
-            else:
-                if len(self.order_depth.buy_orders) > 0:
-                    best_bid_price, best_bid_vol = max(self.order_depth.buy_orders.items(), key=lambda x: x[0], default=(fv, new_position))
-
-                    if best_bid_price >= fv:
-                        sell_vol = min(min(new_position, best_bid_vol), self.max_sell_orders()) # additional param of new_position to get to net neutral
-                        logger.print(f"Neutralizing {new_position} to {new_position - sell_vol} at {best_bid_price}")
-                        self.sell(best_bid_price, sell_vol)
-
+            if new_position > soft_limit:
+                sell_qty = min(self.max_sell_orders(), new_position - soft_limit)
+                self.sell(int(math.ceil(fv)), sell_qty)
+            npos = min(new_position, soft_limit)
+            sell_qty = min(self.max_sell_orders(), npos)
+            self.sell(int(math.ceil(fv + edge_up)), sell_qty)
+        
         elif new_position < 0:
-            if aggressive: # buy as much as possible to get to 0 without overflowing buy orders
-                buy_vol = min(-new_position, self.max_buy_orders())
-                self.buy(fv - agg_down, buy_vol)
-            else:
-                if len(self.order_depth.sell_orders) > 0:
-                    best_ask_price, best_ask_vol = min(self.order_depth.sell_orders.items(), key = lambda x: x[0], default=(fv, new_position))
-                    if best_ask_price <= fv:
-                        buy_vol = min(min(-new_position, -best_ask_vol), self.max_sell_orders())
-                        logger.print(f"Neutralizing {new_position} to {new_position + buy_vol} at {best_ask_price}")
-                        self.buy(best_ask_price, buy_vol)
-
+            if new_position < -soft_limit:
+                buy_qty = min(self.max_buy_orders(), soft_limit - new_position)
+                self.buy(int(math.floor(fv)), buy_qty)
+            npos = max(new_position, -soft_limit)
+            buy_qty = min(self.max_buy_orders(), npos)
+            self.buy(int(math.floor(fv - edge_down)), buy_qty)
+            
 
     def market_make(
         self,
@@ -214,7 +225,7 @@ class Product():
     ):
         max_buy = self.max_buy_orders()
         max_sell = self.max_sell_orders()
-        logger.print(f"Market making at {buy_price}@{max_buy}, {sell_price}@{max_sell}")
+        #logger.print(f"Market making at {buy_price}@{max_buy}, {sell_price}@{max_sell}")
 
         self.buy(buy_price, max_buy)
         self.sell(sell_price, max_sell)
@@ -247,13 +258,16 @@ class Resin(Product):
     def strategy(self):
         fv = self.fair_val()
         self.market_take(fv, fv)
-        self.neutralize(fv, 1, 1, False)
+        self.neutralize(10000, 1, 1, 30)
         self.market_make_undercut(fv, 1)
 
 
 class Kelp(Product):
-    def __init__(self, symbol: str, limit: int, state: TradingState):
+    def __init__(self, symbol: str, limit: int, state: TradingState, edge: float, soft_lim: int):
         super().__init__(symbol, limit, state)
+
+        self.edge = edge
+        self.soft_lim = soft_lim
 
     def fair_val(self):
         mm_bid_price, mm_bid_qty = max(self.order_depth.buy_orders.items(), key = lambda x: x[1])
@@ -269,26 +283,26 @@ class Kelp(Product):
                 avg -= 1
 
         avg = int(avg/2)
-        logger.print(f"Max MM bid/ask: {mm_bid_price}@{mm_bid_qty}, {mm_ask_price}@{mm_ask_qty}. Fair value for kelp = {avg}\n")
+        #logger.print(f"Max MM bid/ask: {mm_bid_price}@{mm_bid_qty}, {mm_ask_price}@{mm_ask_qty}. Fair value for kelp = {avg}\n")
         return avg
     
     def strategy(self):
         fv = self.fair_val()
         self.market_take(fv, fv)
-        self.neutralize(fv, 1, 1, False)
+        self.neutralize(fv, self.edge, self.edge, self.soft_lim)
         self.market_make_undercut(fv, 1)
 
 
 
 class Trader:
-    def executor(self, product: str, state: TradingState): # add product to execute set of strategies
+    def executor(self, product: str, state: TradingState, edge: float, lim: int): # add product to execute set of strategies
 
         if product == "RAINFOREST_RESIN":
             resin = Resin(product, 50, state)
             return resin.execute()
             
         if product == "KELP":
-            kelp = Kelp(product, 50, state)
+            kelp = Kelp(product, 50, state, edge, lim)
             return kelp.execute()
         
         if product == "SQUID_INK":
@@ -301,15 +315,17 @@ class Trader:
         #logger.print("traderData: " + state.traderData)
         #logger.print("Observations: " + str(state.observations))
 
+        edge = float(os.getenv("EDGE", 0.1))
+        lim = float(os.getenv("LIMIT", 10))
         result = {}
 
+        if state.timestamp == 100:
+            print(f"EDGE = {edge}, SOFT_LIM = {lim}")
         traderData = ""
         for product in state.order_depths:
-            position = state.position[product] if product in state.position else 0
-
-            result[product], data_prod = self.executor(product, state)          
+            result[product], data_prod = self.executor(product, state, edge, lim)          
         
         conversions = 1
-        logger.flush(state, result, conversions, traderData)
+        # logger.flush(state, result, conversions, traderData)
 
         return result, conversions, traderData
