@@ -193,30 +193,6 @@ class Product():
             if self.position + self.nbuy >= self.limit:
                 break
 
-    def neutralize(self, fv: float, edge_up: float, edge_down: float, soft_limit: int):
-        """
-        Attempts to zero our position.
-        Liquidates at fair value until under soft limit. Liquidates at fair value + edge until 0.
-        Restricted by max_buy_orders().
-        """
-        logger.print("Running neutralization algorithm:")
-        new_position = self.position + self.nbuy - self.nsell
-        if new_position > 0:
-            if new_position > soft_limit:
-                sell_qty = min(self.max_sell_orders(), new_position - soft_limit)
-                self.sell(int(math.ceil(fv)), sell_qty)
-            npos = min(new_position, soft_limit)
-            sell_qty = min(self.max_sell_orders(), npos)
-            self.sell(int(math.ceil(fv + edge_up)), sell_qty)
-        
-        elif new_position < 0:
-            if new_position < -soft_limit:
-                buy_qty = min(self.max_buy_orders(), soft_limit - new_position)
-                self.buy(int(math.floor(fv)), buy_qty)
-            npos = max(new_position, -soft_limit)
-            buy_qty = min(self.max_buy_orders(), npos)
-            self.buy(int(math.floor(fv - edge_down)), buy_qty)
-            
 
     def market_make(
         self,
