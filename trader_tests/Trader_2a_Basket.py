@@ -247,7 +247,6 @@ class Product():
             res = res + " " + str(price)
         return res
 
-
     def hist_mid_make(self, mm_bot: bool=False):
         hm = self.hist_mid
         if mm_bot:
@@ -266,6 +265,11 @@ class Product():
         order_size = min(self.max_buy_orders(), self.max_sell_orders())
         self.buy(buy_price, order_size)
         self.sell(sell_price, order_size)
+
+    def buy_one(self):
+        if self.position == 0:
+            if len(self.order_depth.sell_orders) > 0:
+                self.buy(self.best_ask(), 1)
 
     def strategy(self): # RUNTIME POLYMORPHISM BTW
         raise NotImplementedError()
@@ -297,22 +301,26 @@ class Kelp(Product):
         return self.max_vol_mid()
 
     def strategy(self):
-        fv = self.fair_val()
-        self.market_take(fv)
-        self.market_make_undercut(fv, 1)
+        #fv = self.fair_val()
+        #self.market_take(fv)
+        #self.market_make_undercut(fv, 1)
+        self.buy_one()
 
-class Ink(Product):
-    def __init__(self, symbol: str, limit: int, state: TradingState):
+class MeanReversion(Product):
+    def __init__(self, symbol: str, limit: int, state: TradingState, gamma: float, window: int):
         super().__init__(symbol, limit, state)
-        self.gamma = 0
-        self.window = 10
+        self.gamma = gamma
+        self.window = window
 
-    def mean_hist(self): 
+    def avg_midprice(self):
         return sum(self.hist_mid)/len(self.hist_mid) if len(self.hist_mid) > 0 else self.mid_price()
     
     def ou(self):
+
+        z = self.compute_z_score()
+
         # OU adjustment: reversion toward fair value
-        adj_price = self.mid_price() + self.gamma * (self.mean_hist() - self.mid_price())
+        adj_price = self.mid_price() + self.gamma * (self.avg_midprice() - self.mid_price())
 
         # Create bid/ask around adjusted price
         spread = 1  # you can tune this
@@ -325,7 +333,7 @@ class Ink(Product):
         self.sell(ask_quote, ask_vol)
 
     def compute_z_score(self):
-        if len(self.prices) < self.window:
+        if len(self.hist_mid) < self.window:
             return 0
         recent = np.array(self.hist_mid)
         mean = recent.mean()
@@ -333,6 +341,13 @@ class Ink(Product):
         if std == 0:
             return 0
         return (self.mid_price() - mean) / std
+
+
+class Ink(MeanReversion):
+    def __init__(self, symbol: str, limit: int, state: TradingState):
+        super().__init__(symbol, limit, state, 0, 10)
+        self.gamma = 0
+        self.window = 10
     
     def fair_val(self):        
         mid = self.max_vol_mid()
@@ -358,7 +373,7 @@ class Croissant(Product):
         ...
 
     def strategy(self):
-        ...
+        self.buy_one()
 
 class Jam(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
@@ -368,7 +383,7 @@ class Jam(Product):
         ...
 
     def strategy(self):
-        ...
+        self.buy_one()
 
 class Djembe(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
@@ -378,7 +393,7 @@ class Djembe(Product):
         ...
 
     def strategy(self):
-        ...
+        self.buy_one()
 
 class Basket1(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
@@ -388,7 +403,7 @@ class Basket1(Product):
         ...
 
     def strategy(self):
-        ...
+        self.buy_one()
 
 class Basket2(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
@@ -398,24 +413,25 @@ class Basket2(Product):
         ...
 
     def strategy(self):
-        ...
+        self.buy_one()
 
+product_classes = {
+    "RAINFOREST_RESIN": (Resin, 50),
+    "KELP": (Kelp, 50),
+    "SQUID_INK": (Ink, 50),
+    "CROISSANT": (Croissant, 250),
+    "JAM": (Jam, 350),
+    "DJEMBE": (Djembe, 60),
+    "PICNIC_BASKET1": (Basket1, 60),
+    "PICNIC_BASKET2": (Basket2, 100)
+}
 
 class Trader:
     def executor(self, product: str, state: TradingState): # add product to execute set of strategies
-
-        if product == "RAINFOREST_RESIN":
-            resin = Resin(product, 50, state)
-            return resin.execute(blank=False)
-            
-        elif product == "KELP":
-            kelp = Kelp(product, 50, state)
-            return kelp.execute(blank=False)
-        
-        elif product == "SQUID_INK":
-            ink = Ink(product, 50, state)
-            return ink.execute(blank=False)
-        
+        if product in product_classes:
+            cls, price = product_classes[product]
+            instance = cls(product, price, state)
+            return instance.execute(blank=False)
         else:
             product = Product(product, 50, state)
             return product.execute(blank=True)
