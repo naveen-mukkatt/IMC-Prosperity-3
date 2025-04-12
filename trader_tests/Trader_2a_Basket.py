@@ -384,63 +384,86 @@ class Croissant(Product):
         super().__init__(symbol, limit, state)
 
     def strategy(self):
-        fv = arbitrage(["CROISSANT", "JAM", "DJEMBE", "PICNIC_BASKET1"], [6, 3, 1, -1], self.state)
-        if fv < -200:
+        fv1 = arbitrage(["CROISSANTS", "JAMS", "DJEMBES", "PICNIC_BASKET1"], [6, 3, 1, -1], self.state)
+        if fv1 < -50:
             for i in range(6):
                 self.buy_one()
-        if fv > 200:
+        if fv1 > 50:
             for i in range(6):
                 self.sell_one()
+        
+        # going to add more here
+
+        fvx = self.fair_val()
+        self.market_take(fvx)
+        self.market_make_undercut(fvx, 1)
 
 class Jam(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
 
     def strategy(self):
-        fv = arbitrage(["CROISSANT", "JAM", "DJEMBE", "PICNIC_BASKET1"], [6, 3, 1, -1], self.state)
-        if fv < -200:
+        fv = arbitrage(["CROISSANTS", "JAMS", "DJEMBES", "PICNIC_BASKET1"], [6, 3, 1, -1], self.state)
+        if fv < -50:
             for i in range(3):
                 self.buy_one()
-        if fv > 200:
+        if fv > 50:
             for i in range(3):
                 self.sell_one()
+        
+        fvx = self.fair_val()
+        self.market_take(fvx)
+        self.market_make_undercut(fvx, 1)
 
 class Djembe(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
 
     def strategy(self):
-        fv = arbitrage(["CROISSANT", "JAM", "DJEMBE", "PICNIC_BASKET1"], [6, 3, 1, -1], self.state)
-        if fv < -200:
-            self.buy_one()
-        if fv > 200:
-            self.sell_one()
+        fv = arbitrage(["CROISSANTS", "JAMS", "DJEMBES", "PICNIC_BASKET1"], [6, 3, 1, -1], self.state)
+        if fv < -50:
+            for i in range(1):
+                self.buy_one()
+        if fv > 50:
+            for i in range(1):
+                self.sell_one()
+        
+        fvx = self.fair_val()
+        self.market_take(fvx)
+        self.market_make_undercut(fvx, 1)
 
 class Basket1(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
 
     def strategy(self):
-        fv = arbitrage(["CROISSANT", "JAM", "DJEMBE", "PICNIC_BASKET1"], [6, 3, 1, -1], self.state)
-        if fv < -200:
-            self.sell_one()
-        if fv > 200:
-            self.buy_one()
-
+        fv = arbitrage(["CROISSANTS", "JAMS", "DJEMBES", "PICNIC_BASKET1"], [6, 3, 1, -1], self.state)
+        if fv < -50:
+            for i in range(1):
+                self.sell_one()
+        if fv > 50:
+            for i in range(1):
+                self.buy_one()
+        
+        fvx = self.fair_val()
+        self.market_take(fvx)
+        self.market_make_undercut(fvx, 1)
+        
 class Basket2(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
 
     def strategy(self):
-        self.buy_one()
+        ...
+        #self.buy_one()
 
 product_classes = {
     "RAINFOREST_RESIN": (Resin, 50),
     "KELP": (Kelp, 50),
     "SQUID_INK": (Ink, 50),
-    "CROISSANT": (Croissant, 250),
-    "JAM": (Jam, 350),
-    "DJEMBE": (Djembe, 60),
+    "CROISSANTS": (Croissant, 250),
+    "JAMS": (Jam, 350),
+    "DJEMBES": (Djembe, 60),
     "PICNIC_BASKET1": (Basket1, 60),
     "PICNIC_BASKET2": (Basket2, 100)
 }
