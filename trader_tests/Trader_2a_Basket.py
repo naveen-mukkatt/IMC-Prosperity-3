@@ -124,6 +124,7 @@ logger = Logger()
 
 class Product():
     def __init__(self, product: str, limit: int, state: TradingState):
+        self.state = state
         self.traderData = state.traderData
         self.timestamp = state.timestamp
         self.listings = state.listings
@@ -271,6 +272,20 @@ class Product():
             if len(self.order_depth.sell_orders) > 0:
                 self.buy(self.best_ask(), 1)
 
+    def sell_one(self):
+        if self.position == 0:
+            if len(self.order_depth.buy_orders) > 0:
+                self.sell(self.best_bid(), 1)
+
+    def fair_val(self): # Children inherit the default fair_val   
+        mid = self.max_vol_mid()
+        prev_mid = mid
+        if len(self.hist_mm_mid) > 0:
+            prev_mid = self.hist_mm_mid[-1]
+
+        val = mid * 0.9 + prev_mid * 0.1
+        return val
+
     def strategy(self): # RUNTIME POLYMORPHISM BTW
         raise NotImplementedError()
         ...
@@ -355,7 +370,6 @@ class Ink(MeanReversion):
         if len(self.hist_mm_mid) > 0:
             prev_mid = self.hist_mm_mid[-1]
 
-        
         val = mid * 0.9 + prev_mid * 0.1
         return val
     
@@ -369,48 +383,53 @@ class Croissant(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
 
-    def fair_val(self):
-        ...
-
     def strategy(self):
-        self.buy_one()
+        fv = arbitrage(["CROISSANT", "JAM", "DJEMBE", "PICNIC_BASKET1"], [6, 3, 1, -1], self.state)
+        if fv < -200:
+            for i in range(6):
+                self.buy_one()
+        if fv > 200:
+            for i in range(6):
+                self.sell_one()
 
 class Jam(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
 
-    def fair_val(self):
-        ...
-
     def strategy(self):
-        self.buy_one()
+        fv = arbitrage(["CROISSANT", "JAM", "DJEMBE", "PICNIC_BASKET1"], [6, 3, 1, -1], self.state)
+        if fv < -200:
+            for i in range(3):
+                self.buy_one()
+        if fv > 200:
+            for i in range(3):
+                self.sell_one()
 
 class Djembe(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
 
-    def fair_val(self):
-        ...
-
     def strategy(self):
-        self.buy_one()
+        fv = arbitrage(["CROISSANT", "JAM", "DJEMBE", "PICNIC_BASKET1"], [6, 3, 1, -1], self.state)
+        if fv < -200:
+            self.buy_one()
+        if fv > 200:
+            self.sell_one()
 
 class Basket1(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
 
-    def fair_val(self):
-        ...
-
     def strategy(self):
-        self.buy_one()
+        fv = arbitrage(["CROISSANT", "JAM", "DJEMBE", "PICNIC_BASKET1"], [6, 3, 1, -1], self.state)
+        if fv < -200:
+            self.sell_one()
+        if fv > 200:
+            self.buy_one()
 
 class Basket2(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
-
-    def fair_val(self):
-        ...
 
     def strategy(self):
         self.buy_one()
@@ -426,11 +445,23 @@ product_classes = {
     "PICNIC_BASKET2": (Basket2, 100)
 }
 
+# zero_relation: List - contains coefficients on each item, should result in zero of all items at the end
+def arbitrage(product_list: List[str], zero_relation: List[float], state: TradingState):
+    total_fair_val = 0
+    for i in range(len(product_list)):
+        product, coef = product_list[i], zero_relation[i]
+        if product not in product_classes:
+            return None
+        cls, limit = product_classes[product]
+        instance = cls(product, limit, state)
+        total_fair_val += coef * instance.fair_val() # required to have a fair_val() method to work
+    return total_fair_val
+
 class Trader:
     def executor(self, product: str, state: TradingState): # add product to execute set of strategies
         if product in product_classes:
-            cls, price = product_classes[product]
-            instance = cls(product, price, state)
+            cls, limit = product_classes[product]
+            instance = cls(product, limit, state)
             return instance.execute(blank=False)
         else:
             product = Product(product, 50, state)
