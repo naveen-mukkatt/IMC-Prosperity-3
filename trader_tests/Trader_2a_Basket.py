@@ -143,28 +143,83 @@ class Product():
         self.init_hist_mid()
         self.orders: List[Order] = []
         self.window = 10
+
+    def orderbook_buy_size(self):
+        return sum(self.order_depth.buy_orders.values())
+    def orderbook_sell_size(self):
+        return -sum(self.order_depth.sell_orders.values())
     
-    def buy(self, price: int, quantity: int):
-        if quantity <= self.max_buy_orders():
+    def limit_buy_orders(self):
+        return self.limit - self.position - self.nbuy 
+    def limit_sell_orders(self):
+        return self.limit + self.position - self.nsell
+    
+    def max_buy_orders(self):
+        return min(self.limit_buy_orders(), self.orderbook_sell_size())
+    def max_sell_orders(self):
+        return min(self.limit_sell_orders(), self.orderbook_buy_size())
+    
+    def buy(self, price: int, quantity: int, print: bool=False):
+        if print:
+            logger.print("Buy Order: ", price, quantity)     
+        if quantity > self.limit_buy_orders():
+            logger.print("Buy Order: ", price, quantity, " exceeds max buy orders")
+        elif quantity > 0 and quantity <= self.limit_buy_orders():
             self.orders.append(Order(self.product, int(price), quantity))
             self.nbuy += quantity
-    def sell(self, price: int, quantity: int):
-        if quantity <= self.max_sell_orders():
+    def sell(self, price: int, quantity: int, print: bool=False):
+        if print:
+            logger.print("Sell Order: ", price, quantity)
+        if quantity > self.limit_sell_orders():
+            logger.print("Sell Order: ", price, quantity, " exceeds max sell orders")
+        elif quantity > 0 and quantity <= self.limit_sell_orders():
             self.orders.append(Order(self.product, int(price), -quantity))
             self.nsell += quantity
-    def max_buy_orders(self):
-        return self.limit - self.position - self.nbuy 
-    def max_sell_orders(self):
-        return self.limit + self.position - self.nsell
-    def active_position(self):
-        return self.position + self.nbuy - self.nsell
     
+    def full_buy(self, quantity: int):
+        """Buy the orderbook until the quantity of shares are bought. Limited by max_buy_orders."""
+        q = quantity
+        for price, volume in self.order_depth.sell_orders.items():
+            if volume > 0:
+                buy_vol = min(self.limit_buy_orders(), volume)
+                self.buy(price, buy_vol)
+                q -= buy_vol
+                if q <= 0 or self.limit_buy_orders() <= 0:
+                    break
+    def full_sell(self, quantity: int):
+        """Sell the orderbook until the quantity of shares are sold. Limited by max_sell_orders."""
+        q = quantity
+        for price, volume in self.order_depth.buy_orders.items():
+            if volume > 0:
+                sell_vol = min(self.limit_sell_orders(), volume)
+                self.sell(price, sell_vol)
+                q -= sell_vol
+                if q <= 0 or self.limit_sell_orders() <= 0:
+                    break
+
+    def cancel_orders(self):
+        """Cancel all orders."""
+        self.orders = []
+        self.nsell = 0
+        self.nbuy = 0   
+    def cancel_buy_orders(self):
+        """Cancel all buy orders."""
+        self.orders = [order for order in self.orders if order.quantity < 0]
+        self.nsell = 0
+        self.nbuy = 0
+    def cancel_sell_orders(self):
+        """Cancel all sell orders."""
+        self.orders = [order for order in self.orders if order.quantity > 0]
+        self.nsell = 0
+        self.nbuy = 0
+
+    def active_position(self):
+        return self.position + self.nbuy - self.nsell   
     def best_bid(self):
         if len(self.order_depth.buy_orders) > 0:
             return max(self.order_depth.buy_orders.keys())
         else:
             return math.nan
-        
     def best_ask(self):
         if len(self.order_depth.sell_orders) > 0:
             return min(self.order_depth.sell_orders.keys())
@@ -175,34 +230,31 @@ class Product():
         return (self.best_bid() + self.best_ask()) / 2
         
     def market_take(self, fair_val: float):
-        logger.print("Market Taking:")
         for bid_price, bid_vol in self.order_depth.buy_orders.items():
             if bid_price > fair_val or (bid_price == fair_val and self.active_position() > 0): 
-                sell_vol = min(self.max_sell_orders(), bid_vol)
+                sell_vol = min(self.limit_sell_orders(), bid_vol)
                 if bid_price == fair_val:
                     sell_vol = min(sell_vol, self.active_position())
                 if sell_vol > 0:
-                    logger.print(f"Market take: selling {sell_vol}@{bid_price}\n")
-                    self.sell(bid_price, sell_vol)
+                    self.sell(bid_price, sell_vol, print=True)
 
 
         for ask_price, ask_vol in self.order_depth.sell_orders.items():
             ask_vol *= -1
             if ask_price < fair_val or (ask_price == fair_val and self.active_position() < 0):
-                buy_vol = min(self.max_buy_orders(), ask_vol)
+                buy_vol = min(self.limit_buy_orders(), ask_vol)
                 if ask_price == fair_val:
                     buy_vol = min(buy_vol, -self.active_position())
                 if buy_vol > 0:
-                    logger.print(f"Market take: buying {buy_vol}@{ask_price}\n")
-                    self.buy(ask_price, buy_vol)
+                    self.buy(ask_price, buy_vol, print=True)
 
     def market_make(
         self,
         buy_price: int,
         sell_price: int
     ):
-        self.buy(buy_price, self.max_buy_orders())
-        self.sell(sell_price, self.max_sell_orders())
+        self.buy(buy_price, self.limit_buy_orders())
+        self.sell(sell_price, self.limit_sell_orders())
     
     def market_make_undercut(
         self,
@@ -235,7 +287,7 @@ class Product():
                 self.hist_mm_mid.append(float(mm_price))
 
     def return_mids(self):
-        """Converts self.hist_mid and self.hist_mm_mid into string form for TraderData.
+        """Converts self.hist_mid and self.hist_mm_mid into string form for TraderData, limiting based on window size.
         String form: [PRODUCT] [mp1] [mp2] ... [mp10]
         [PRODUCT] [mm_mp1] [mm_mp2] ... [mm_mp10]"""
         self.hist_mid.append(self.mid_price())
@@ -265,19 +317,15 @@ class Product():
         offset = max(1, (self.best_ask() - self.best_bid()) // 2)
         buy_price = round(value - offset)
         sell_price = round(value + offset)
-        order_size = min(self.max_buy_orders(), self.max_sell_orders())
+        order_size = min(self.limit_buy_orders(), self.limit_sell_orders())
         self.buy(buy_price, order_size)
         self.sell(sell_price, order_size)
 
     def buy_one(self):
+        """Utility function to buy one share at the start and test PnL."""
         if self.position == 0:
             if len(self.order_depth.sell_orders) > 0:
                 self.buy(self.best_ask(), 1)
-
-    def sell_one(self):
-        if self.position == 0:
-            if len(self.order_depth.buy_orders) > 0:
-                self.sell(self.best_bid(), 1)
 
     def fair_val(self): # Children inherit the default fair_val   
         mid = self.max_vol_mid()
@@ -296,7 +344,9 @@ class Product():
         if blank:
             return [], ""
         self.strategy()
-        return self.orders, self.return_mids()
+    
+    def getData(self):
+        return self.return_mids()
 
 class Resin(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
@@ -343,8 +393,8 @@ class MeanReversion(Product):
         spread = 1  # you can tune this
         bid_quote = int(adj_price - spread)
         ask_quote = int(adj_price + spread)
-        bid_vol = min(20, self.max_buy_orders())
-        ask_vol = min(20, self.max_sell_orders())
+        bid_vol = min(20, self.limit_buy_orders())
+        ask_vol = min(20, self.limit_sell_orders())
 
         self.buy(bid_quote, bid_vol)
         self.sell(ask_quote, ask_vol)
@@ -358,8 +408,6 @@ class MeanReversion(Product):
         if std == 0:
             return 0
         return (self.mid_price() - mean) / std
-
-
 class Ink(MeanReversion):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state, 0, 10)
@@ -376,9 +424,6 @@ class Ink(MeanReversion):
         return val
     
     def strategy(self):
-        #fv = self.fair_val()
-        #self.market_take(fv)
-        #self.market_make_undercut(fv, 2)
         self.ou()
 
 class Croissant(Product):
@@ -386,66 +431,27 @@ class Croissant(Product):
         super().__init__(symbol, limit, state)
 
     def strategy(self):
-        fv1 = arbitrage(["CROISSANTS", "JAMS", "DJEMBES", "PICNIC_BASKET1"], [6, 3, 1, -1], self.state)
-        if fv1 < -50:
-            for i in range(6):
-                self.buy_one()
-        if fv1 > 50:
-            for i in range(6):
-                self.sell_one()
-        
-        # going to add more here
-
-        fvx = self.fair_val()
-        self.market_take(fvx)
-        self.market_make_undercut(fvx, 1)
+        ...
 
 class Jam(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
 
     def strategy(self):
-        fv = arbitrage(["CROISSANTS", "JAMS", "DJEMBES", "PICNIC_BASKET1"], [6, 3, 1, -1], self.state)
-        if fv < -50:
-            for i in range(3):
-                self.buy_one()
-        if fv > 50:
-            for i in range(3):
-                self.sell_one()
+        ...
 
 class Djembe(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
 
     def strategy(self):
-        fv = arbitrage(["CROISSANTS", "JAMS", "DJEMBES", "PICNIC_BASKET1"], [6, 3, 1, -1], self.state)
-        if fv < -50:
-            for i in range(1):
-                self.buy_one()
-        if fv > 50:
-            for i in range(1):
-                self.sell_one()
-        
-        fvx = self.fair_val()
-        self.market_take(fvx)
-        self.market_make_undercut(fvx, 1)
-
+        ...
 class Basket1(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
 
     def strategy(self):
-        fv = arbitrage(["CROISSANTS", "JAMS", "DJEMBES", "PICNIC_BASKET1"], [6, 3, 1, -1], self.state)
-        if fv < -50:
-            for i in range(1):
-                self.sell_one()
-        if fv > 50:
-            for i in range(1):
-                self.buy_one()
-        
-        fvx = self.fair_val()
-        self.market_take(fvx)
-        self.market_make_undercut(fvx, 1)
+        ...
         
 class Basket2(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
@@ -455,72 +461,193 @@ class Basket2(Product):
         ...
         #self.buy_one()
 
-class BasketArb(Product):
-    def __init__(self, symbol: str, limit: int, state: TradingState, croissant: Product, jam: Product, djembe: Product, basket1: Product, basket2: Product):
-        super().__init__(symbol, limit, state)
+class ArbStrategy():
+    def __init__(self, strat: str, arb_prods: List[Product], arb_coefs: List[float], mean: float, std: float, cutoffs: tuple):
+        self.strat = strat
+        self.arb_prods = arb_prods
+        self.arb_coefs = arb_coefs
+        self.mean = mean
+        self.std = std
+        self.cutoffs = cutoffs
+    
+    def z_score(self):
+        total = 0
+        for prod, coef in zip(self.arb_prods, self.arb_coefs):
+            total += coef * prod.mid_price()
+        z = (total - self.mean) / self.std
+        return z
+    
+    def buy_val(self):
+        # Calculate value of long position
+        total = 0
+        for prod, coef in zip(self.arb_prods, self.arb_coefs):
+            if coef > 0:
+                total += coef * prod.best_ask()
+            else:
+                total += coef * prod.best_bid()
+        return total
+    def sell_val(self):
+        # Calculate value of short position
+        total = 0
+        for prod, coef in zip(self.arb_prods, self.arb_coefs):
+            if coef > 0:
+                total += coef * prod.best_bid()
+            else:
+                total += coef * prod.best_ask()
+        return total
+    
+    def signal(self):
+        z = self.z_score()
+        if abs(z) <= self.cutoffs[0]:
+            return 0 # zero position
+        elif abs(z) > self.cutoffs[1]:
+            if z > 0: 
+                return 1 # sell
+            else:
+                return -1 # buy
+        else:
+            return -99 # no signal
+    
+    def arbitrage(self):
+        logger.print("Arbitrage Signal + Z-Score: ", self.strat, self.signal(), self.z_score())
+        sgn = self.signal()
+        if sgn == 1:
+            # find max short quantity that's safe without overflowing
+            max_short = min([
+                prod.max_buy_orders() // coef if coef > 0
+                else prod.max_sell_orders() // abs(coef)
+                for prod, coef in zip(self.arb_prods, self.arb_coefs)
+                if coef != 0
+            ])            
+            
+            logger.print("Max Short: ", max_short)
+            for prod, coef in zip(self.arb_prods, self.arb_coefs):
+                if coef > 0:
+                    prod.full_buy(int(coef * max_short))
+                elif coef < 0:
+                    prod.full_sell(int(-coef * max_short))
+        
+        elif sgn == -1:
+            # find max long quantity that's safe without overflowing
+            max_long = min([
+                prod.max_sell_orders() // coef if coef > 0 
+                else prod.max_buy_orders() // abs(coef)
+                for prod, coef in zip(self.arb_prods, self.arb_coefs)
+                if coef != 0
+            ])
+
+            logger.print("Max Long: ", max_long)
+
+            for prod, coef in zip(self.arb_prods, self.arb_coefs):
+                if coef > 0:
+                    prod.full_sell(int(coef * max_long))
+                elif coef < 0:
+                    prod.full_buy(int(-coef * max_long))
+
+        elif sgn == 0:
+            base = -self.arb_prods[-1].active_position() # negative if need to sell, positive if need to buy
+
+            max_pos = min([
+                prod.max_buy_orders() // abs(coef) if coef * base > 0
+                else prod.max_sell_orders() // abs(coef) if coef * base < 0
+                else 0
+                for prod, coef in zip(self.arb_prods, self.arb_coefs)
+            ])
+
+            logger.print("Zeroing Position: ", max_pos)
+
+            for prod, coef in zip(self.arb_prods, self.arb_coefs):
+                if coef * base > 0:
+                    prod.full_buy(int(abs(coef) * max_pos))
+                elif coef * base < 0:
+                    prod.full_sell(int(abs(coef) * max_pos))
+
+class BasketArb():
+    def __init__(self, symbol: str, croissant: Product, jam: Product, djembe: Product, basket1: Product, basket2: Product):
+        self.symbol = symbol
         self.croissant = croissant
         self.jam = jam
         self.djembe = djembe
         self.basket1 = basket1
         self.basket2 = basket2
 
-    # zero_relation: List - contains coefficients on each item, should result in zero of all items at the end
-
-    def arbitrage(product_list: List[str], coefs: List[float]):
+    def execute_arb(self):
+        strats = ["ARB1", "ARB2"]
+        arb_prods = {
+            "ARB1": [self.croissant, self.jam, self.djembe, self.basket1],
+            "ARB2": [self.croissant, self.jam, self.basket2],
+        }
+        arb_coefs = {
+            "ARB1": [6, 3, 1, -1],
+            "ARB2": [4, 2, -1],
+        }
+        mean = {
+            "ARB1": -48,
+            "ARB2": 30,
+        }
+        std = {
+            "ARB1": 85,
+            "ARB2": 60,
+        }
+        cutoffs = {
+            "ARB1": (0.25, 1.75),
+            "ARB2": (0.25, 1.75)
+        }
+        arb_strats = {
+            strat: ArbStrategy(strat, arb_prods[strat], arb_coefs[strat], mean[strat], std[strat], cutoffs[strat])
+            for strat in strats
+        }
+        # Execute both
+        for strat in ["ARB1"]:
+            arb_strats[strat].arbitrage()
         
-        ...
-
-    def choose_arb(self):
         
-        return self.choose_arb()
+    def execute(self):
+        self.execute_arb()
     
-    def gen_signal(self, product_list: List[str], coefs: List[float]):
-        """returns -1 """
-    def strategy(self):
-        fv = arbitrage(["CROISSANTS", "JAMS", "DJEMBES", "PICNIC_BASKET1"], [6, 3, 1, -1], self.state)
-        if fv < -50:
-            for i in range(1):
-                self.buy_one()
-        if fv > 50:
-            for i in range(1):
-                self.sell_one()
-        
-        fvx = self.fair_val()
-
+    def getData(self):
+        return "Arb done"
 
 def create_products(state: TradingState):
     products = {}
-    for product, (cls, limit) in product_classes.items():
-        products[product] = cls(product, limit, state)
+    products["RAINFOREST_RESIN"] = Resin("RAINFOREST_RESIN", 50, state)
+    products["KELP"] = Kelp("KELP", 50, state)
+    products["SQUID_INK"] = Ink("SQUID_INK", 50, state)
+    products["CROISSANTS"] = Croissant("CROISSANTS", 250, state)
+    products["JAMS"] = Jam("JAMS", 350, state)
+    products["DJEMBES"] = Djembe("DJEMBES", 60, state)
+    products["PICNIC_BASKET1"] = Basket1("PICNIC_BASKET1", 60, state)
+    products["PICNIC_BASKET2"] = Basket2("PICNIC_BASKET2", 100, state)
+    products["BASKET_ARB"] = BasketArb("BASKET_ARB", 
+                                        products["CROISSANTS"],
+                                        products["JAMS"],
+                                        products["DJEMBES"],
+                                        products["PICNIC_BASKET1"],
+                                        products["PICNIC_BASKET2"])
     return products
-
-product_classes = {
-    "RAINFOREST_RESIN": (Resin, 50),
-    "KELP": (Kelp, 50),
-    "SQUID_INK": (Ink, 50),
-    "CROISSANTS": (Croissant, 250),
-    "JAMS": (Jam, 350),
-    "DJEMBES": (Djembe, 60),
-    "PICNIC_BASKET1": (Basket1, 60),
-    "PICNIC_BASKET2": (Basket2, 100)
-}
 
 class Trader:
         
     def run(self, state: TradingState):
         # Only method required. It takes all buy and sell orders for all symbols as an input, and outputs a list of orders to be sent
-        logger.print("traderData: " + state.traderData)
-        logger.print("Observations: " + str(state.observations))
+        #logger.print("traderData: " + state.traderData)
+        #logger.print("Observations: " + str(state.observations))
 
         result = {}
 
         traderData = ""
         product_instances = create_products(state)
+
         for product, instance in product_instances.items():
-            orders, data_prod = instance.execute(blank=False)
-            traderData += data_prod + "\n"
-            result[product] = orders   
-        
+            if product in ["RAINFOREST_RESIN", "KELP", "SQUID_INK", "BASKET_ARB"]:
+                instance.execute()
+
+        for product, instance in product_instances.items():   
+            #chcek if instance is instance of Product
+            if isinstance(instance, Product):
+                traderData += instance.getData() + "\n"
+                result[product] = instance.orders
+
         conversions = 1
         logger.flush(state, result, conversions, traderData)
 
