@@ -4,3 +4,4 @@ backtests/
 __pycache__/
 submissions/
 myenv/
+.python-version

@@ -7,6 +7,25 @@ import queue
 import numpy as np
 from abc import ABC, abstractmethod
 
+# flag must be set to true before submitting
+submission = True
+
+if submission == True:
+    # parameters necessary for submission, do NOT CHANGE
+    verbose_level = 2
+    log_iter = 1
+else:
+    # user customizable parameters
+    verbose_level = 0
+    log_iter = 10000
+
+# verbosity level:
+# 0 - zero output by default (can use for debugging)
+# 1 - log normal operations
+# 2 - print EVERYTHING required for prosperity imc
+# log on timestamps that are multiples of log_iter
+
+
 class Logger:
     def __init__(self) -> None:
         self.logs = ""
@@ -31,17 +50,23 @@ class Logger:
         # We truncate state.traderData, trader_data, and self.logs to the same max. length to fit the log limit
         max_item_length = (self.max_log_length - base_length) // 3
 
-        print(
-            self.to_json(
-                [
-                    self.compress_state(state, self.truncate(state.traderData, max_item_length)),
-                    self.compress_orders(orders),
-                    conversions,
-                    self.truncate(trader_data, max_item_length),
-                    self.truncate(self.logs, max_item_length),
-                ]
-            )
-        )
+        if (state.timestamp % log_iter) == 0:
+            if verbose_level == 2:
+                print(
+                    self.to_json(
+                        [
+                            self.compress_state(state, self.truncate(state.traderData, max_item_length)),
+                            self.compress_orders(orders),
+                            conversions,
+                            self.truncate(trader_data, max_item_length),
+                            self.truncate(self.logs, max_item_length),
+                        ]
+                    )
+                )
+            else:
+                print (f"Time: {state.timestamp}")
+                print (self.logs)
+
 
         self.logs = ""
 
@@ -119,8 +144,12 @@ class Logger:
             return value
 
         return value[: max_length - 3] + "..."
+
 logger = Logger()
 
+def log(string, verbose=1):
+    if verbose <= verbose_level:
+        logger.print(string)
 
 class Product():
     def __init__(self, product: str, limit: int, state: TradingState):
@@ -140,6 +169,10 @@ class Product():
         self.nbuy = 0
         self.hist_mid: List[float] = []
         self.hist_mm_mid: List[float]= []
+        self.hist_sum = 0
+        self.hist_sum_squared = 0
+        self.hist_mean = 0
+        self.hist_std = 0
         self.init_hist_mid()
         self.orders: List[Order] = []
         self.window = 10
@@ -229,24 +262,27 @@ class Product():
     def mid_price(self):
         return (self.best_bid() + self.best_ask()) / 2
         
-    def market_take(self, fair_val: float):
+    def market_take(self, fair_val: float, edge: float = 0):
+
+        bid_val = fair_val - edge
+        ask_val = fair_val + edge
+
         for bid_price, bid_vol in self.order_depth.buy_orders.items():
-            if bid_price > fair_val or (bid_price == fair_val and self.active_position() > 0): 
-                sell_vol = min(self.limit_sell_orders(), bid_vol)
-                if bid_price == fair_val:
+            if bid_price > bid_val or (bid_price == bid_val and self.active_position() > 0): 
+                sell_vol = min(self.max_sell_orders(), bid_vol)
+                if bid_price == bid_val:
                     sell_vol = min(sell_vol, self.active_position())
                 if sell_vol > 0:
-                    self.sell(bid_price, sell_vol, print=True)
-
+                    self.sell(bid_price, sell_vol)
 
         for ask_price, ask_vol in self.order_depth.sell_orders.items():
             ask_vol *= -1
-            if ask_price < fair_val or (ask_price == fair_val and self.active_position() < 0):
-                buy_vol = min(self.limit_buy_orders(), ask_vol)
-                if ask_price == fair_val:
+            if ask_price < ask_val or (ask_price == ask_val and self.active_position() < 0):
+                buy_vol = min(self.max_buy_orders(), ask_vol)
+                if ask_price == ask_val:
                     buy_vol = min(buy_vol, -self.active_position())
                 if buy_vol > 0:
-                    self.buy(ask_price, buy_vol, print=True)
+                    self.buy(ask_price, buy_vol)
 
     def market_make(
         self,
@@ -259,7 +295,7 @@ class Product():
     def market_make_undercut(
         self,
         fair_val: int,
-        edge: float,
+        edge: float = 0,
     ):
         mm_buy = max([bid for bid in self.order_depth.buy_orders.keys() if bid < fair_val - edge], default=fair_val - edge - 1) + 1
         mm_sell = min([ask for ask in self.order_depth.sell_orders.keys() if ask > fair_val + edge], default=fair_val + edge + 1) - 1
@@ -281,20 +317,30 @@ class Product():
                 break
         
         if ind >= 0:
-            for price in prods[ind].split(" ")[1:]:
+            for price in prods[ind].split(" ")[3:]:
                 self.hist_mid.append(float(price))
-            for mm_price in prods[ind + 1].split(" ")[1:]:
+            for mm_price in prods[ind + 1].split(" ")[3:]:
                 self.hist_mm_mid.append(float(mm_price))
 
+            iter = self.state.timestamp / 100
+
+            self.hist_sum = float(prods[ind].split(" ")[1])
+            self.hist_sum_squared = float(prods[ind].split(" ")[2])
+            self.hist_mean = self.hist_sum / iter
+            self.hist_std = math.sqrt(self.hist_sum_squared / iter - self.hist_mean ** 2)
+
     def return_mids(self):
-        """Converts self.hist_mid and self.hist_mm_mid into string form for TraderData, limiting based on window size.
-        String form: [PRODUCT] [mp1] [mp2] ... [mp10]
-        [PRODUCT] [mm_mp1] [mm_mp2] ... [mm_mp10]"""
+        """Converts self.hist_mid and self.hist_mm_mid into string form for TraderData.
+        String form: [PRODUCT] [sum] [sum^2] [mp1] [mp2] ... [mp10]
+        [PRODUCT] [sum] [sum^2] [mm_mp1] [mm_mp2] ... [mm_mp10]"""
+        
         self.hist_mid.append(self.mid_price())
         self.hist_mm_mid.append(self.max_vol_mid())
         self.hist_mid = self.hist_mid[-self.window:]
         self.hist_mm_mid = self.hist_mm_mid[-self.window:]
         res = self.product
+        res += " " + str(self.mid_price() + self.hist_sum)
+        res += " " + str(self.mid_price() ** 2 + self.hist_sum_squared)
         for price in self.hist_mid:
             res = res + " " + str(price)
         res += "\n" + self.product
@@ -368,10 +414,10 @@ class Kelp(Product):
         return self.max_vol_mid()
 
     def strategy(self):
-        #fv = self.fair_val()
-        #self.market_take(fv)
-        #self.market_make_undercut(fv, 1)
-        self.buy_one()
+        fv = self.fair_val()
+        self.market_take(fv)
+        self.market_make_undercut(fv, 1)
+        #self.buy_one()
 
 class MeanReversion(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState, gamma: float, window: int):
@@ -408,23 +454,35 @@ class MeanReversion(Product):
         if std == 0:
             return 0
         return (self.mid_price() - mean) / std
-class Ink(MeanReversion):
+
+class BuyLowSellHigh(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
-        super().__init__(symbol, limit, state, 0, 10)
-        self.gamma = 0
+        super().__init__(symbol, limit, state)
+
+    def buy_low_sell_high(self, mean_diff : float = -1):
+        if len(self.hist_mid) < self.window:
+            return
+        if mean_diff < 0:
+            mean_diff = self.hist_std
+
+        lo = self.hist_mean - mean_diff
+        hi = self.hist_mean + mean_diff
+
+        if self.best_ask() < lo:
+            self.buy(self.best_ask(), self.max_buy_orders())
+        elif self.best_bid() > hi:
+            self.sell(self.best_bid(), self.max_sell_orders())
+
+class Ink(BuyLowSellHigh):
+    def __init__(self, symbol: str, limit: int, state: TradingState):
+        super().__init__(symbol, limit, state)
         self.window = 10
     
-    def fair_val(self):        
-        mid = self.max_vol_mid()
-        prev_mid = mid
-        if len(self.hist_mm_mid) > 0:
-            prev_mid = self.hist_mm_mid[-1]
-
-        val = mid * 0.9 + prev_mid * 0.1
-        return val
+    def fair_val(self):      
+        return -1  
     
     def strategy(self):
-        self.ou()
+        self.buy_low_sell_high(mean_diff = 10)
 
 class Croissant(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
@@ -630,8 +688,8 @@ class Trader:
         
     def run(self, state: TradingState):
         # Only method required. It takes all buy and sell orders for all symbols as an input, and outputs a list of orders to be sent
-        #logger.print("traderData: " + state.traderData)
-        #logger.print("Observations: " + str(state.observations))
+        log("traderData: " + state.traderData, 2)
+        log("Observations: " + str(state.observations), 2)
 
         result = {}
 
