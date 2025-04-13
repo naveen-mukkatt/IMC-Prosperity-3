@@ -174,12 +174,16 @@ class Product():
     def mid_price(self):
         return (self.best_bid() + self.best_ask()) / 2
         
-    def market_take(self, fair_val: float):
+    def market_take(self, fair_val: float, edge: int = 0):
         logger.print("Market Taking:")
+
+        bid_val = fair_val - edge
+        ask_val = fair_val + edge
+
         for bid_price, bid_vol in self.order_depth.buy_orders.items():
-            if bid_price > fair_val or (bid_price == fair_val and self.active_position() > 0): 
+            if bid_price > bid_val or (bid_price == bid_val and self.active_position() > 0): 
                 sell_vol = min(self.max_sell_orders(), bid_vol)
-                if bid_price == fair_val:
+                if bid_price == bid_val:
                     sell_vol = min(sell_vol, self.active_position())
                 if sell_vol > 0:
                     logger.print(f"Market take: selling {sell_vol}@{bid_price}\n")
@@ -188,9 +192,9 @@ class Product():
 
         for ask_price, ask_vol in self.order_depth.sell_orders.items():
             ask_vol *= -1
-            if ask_price < fair_val or (ask_price == fair_val and self.active_position() < 0):
+            if ask_price < ask_val or (ask_price == ask_val and self.active_position() < 0):
                 buy_vol = min(self.max_buy_orders(), ask_vol)
-                if ask_price == fair_val:
+                if ask_price == ask_val:
                     buy_vol = min(buy_vol, -self.active_position())
                 if buy_vol > 0:
                     logger.print(f"Market take: buying {buy_vol}@{ask_price}\n")
@@ -207,7 +211,7 @@ class Product():
     def market_make_undercut(
         self,
         fair_val: int,
-        edge: float,
+        edge: float = 0,
     ):
         mm_buy = max([bid for bid in self.order_depth.buy_orders.keys() if bid < fair_val - edge], default=fair_val - edge - 1) + 1
         mm_sell = min([ask for ask in self.order_depth.sell_orders.keys() if ask > fair_val + edge], default=fair_val + edge + 1) - 1
@@ -490,11 +494,17 @@ class BasketArb(Product):
 
 def create_products(state: TradingState):
     products = {}
-    for product, (cls, limit) in product_classes.items():
+    for product, (cls, limit) in round_2_product_classes.items():
         products[product] = cls(product, limit, state)
     return products
 
-product_classes = {
+round_1_product_classes = {
+    "RAINFOREST_RESIN": (Resin, 50),
+    "KELP": (Kelp, 50),
+    "SQUID_INK": (Ink, 50),
+}
+
+round_2_product_classes = {
     "RAINFOREST_RESIN": (Resin, 50),
     "KELP": (Kelp, 50),
     "SQUID_INK": (Ink, 50),
