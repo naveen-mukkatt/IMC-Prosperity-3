@@ -145,11 +145,13 @@ class Product():
         self.window = 10
     
     def buy(self, price: int, quantity: int):
-        self.orders.append(Order(self.product, int(price), quantity))
-        self.nbuy += quantity
+        if quantity <= self.max_buy_orders():
+            self.orders.append(Order(self.product, int(price), quantity))
+            self.nbuy += quantity
     def sell(self, price: int, quantity: int):
-        self.orders.append(Order(self.product, int(price), -quantity))
-        self.nsell += quantity
+        if quantity <= self.max_sell_orders():
+            self.orders.append(Order(self.product, int(price), -quantity))
+            self.nsell += quantity
     def max_buy_orders(self):
         return self.limit - self.position - self.nbuy 
     def max_sell_orders(self):
@@ -410,10 +412,6 @@ class Jam(Product):
         if fv > 50:
             for i in range(3):
                 self.sell_one()
-        
-        fvx = self.fair_val()
-        self.market_take(fvx)
-        self.market_make_undercut(fvx, 1)
 
 class Djembe(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
@@ -457,6 +455,45 @@ class Basket2(Product):
         ...
         #self.buy_one()
 
+class BasketArb(Product):
+    def __init__(self, symbol: str, limit: int, state: TradingState, croissant: Product, jam: Product, djembe: Product, basket1: Product, basket2: Product):
+        super().__init__(symbol, limit, state)
+        self.croissant = croissant
+        self.jam = jam
+        self.djembe = djembe
+        self.basket1 = basket1
+        self.basket2 = basket2
+
+    # zero_relation: List - contains coefficients on each item, should result in zero of all items at the end
+
+    def arbitrage(product_list: List[str], coefs: List[float]):
+        
+        ...
+
+    def choose_arb(self):
+        
+        return self.choose_arb()
+    
+    def gen_signal(self, product_list: List[str], coefs: List[float]):
+        """returns -1 """
+    def strategy(self):
+        fv = arbitrage(["CROISSANTS", "JAMS", "DJEMBES", "PICNIC_BASKET1"], [6, 3, 1, -1], self.state)
+        if fv < -50:
+            for i in range(1):
+                self.buy_one()
+        if fv > 50:
+            for i in range(1):
+                self.sell_one()
+        
+        fvx = self.fair_val()
+
+
+def create_products(state: TradingState):
+    products = {}
+    for product, (cls, limit) in product_classes.items():
+        products[product] = cls(product, limit, state)
+    return products
+
 product_classes = {
     "RAINFOREST_RESIN": (Resin, 50),
     "KELP": (Kelp, 50),
@@ -468,27 +505,7 @@ product_classes = {
     "PICNIC_BASKET2": (Basket2, 100)
 }
 
-# zero_relation: List - contains coefficients on each item, should result in zero of all items at the end
-def arbitrage(product_list: List[str], zero_relation: List[float], state: TradingState):
-    total_fair_val = 0
-    for i in range(len(product_list)):
-        product, coef = product_list[i], zero_relation[i]
-        if product not in product_classes:
-            return None
-        cls, limit = product_classes[product]
-        instance = cls(product, limit, state)
-        total_fair_val += coef * instance.fair_val() # required to have a fair_val() method to work
-    return total_fair_val
-
 class Trader:
-    def executor(self, product: str, state: TradingState): # add product to execute set of strategies
-        if product in product_classes:
-            cls, limit = product_classes[product]
-            instance = cls(product, limit, state)
-            return instance.execute(blank=False)
-        else:
-            product = Product(product, 50, state)
-            return product.execute(blank=True)
         
     def run(self, state: TradingState):
         # Only method required. It takes all buy and sell orders for all symbols as an input, and outputs a list of orders to be sent
@@ -498,9 +515,11 @@ class Trader:
         result = {}
 
         traderData = ""
-        for product in state.order_depths:
-            result[product], data_prod = self.executor(product, state)  
-            traderData += data_prod + "\n"        
+        product_instances = create_products(state)
+        for product, instance in product_instances.items():
+            orders, data_prod = instance.execute(blank=False)
+            traderData += data_prod + "\n"
+            result[product] = orders   
         
         conversions = 1
         logger.flush(state, result, conversions, traderData)
