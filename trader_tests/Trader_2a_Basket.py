@@ -391,9 +391,10 @@ class Product():
     def fair_val(self):   
         return self.max_vol_mid()
 
-    def strategy(self): # RUNTIME POLYMORPHISM BTW
-        raise NotImplementedError()
-        ...
+    def strategy(self, amt=0):
+        fvx = self.fair_val()
+        self.market_take(fvx)
+        self.market_make_undercut(fvx, amt)
 
     def execute(self, blank: bool=False): 
         if blank:
@@ -411,9 +412,7 @@ class Resin(Product):
         return 10000
     
     def strategy(self):
-        fv = self.fair_val()
-        self.market_take(fv)
-        self.market_make_undercut(fv, 1)
+        super().strategy(1)
 
 class Kelp(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
@@ -423,9 +422,7 @@ class Kelp(Product):
         return self.max_vol_mid()
 
     def strategy(self):
-        fv = self.fair_val()
-        self.market_take(fv)
-        self.market_make_undercut(fv, 1)
+        super().strategy(1)
 
 class MeanReversion(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState, gamma: float, window: int):
@@ -495,98 +492,37 @@ class Ink(BuyLowSellHigh):
 class Croissant(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
-
+    
     def strategy(self):
-        fv = arbitrage(["CROISSANTS", "JAMS", "DJEMBES", "PICNIC_BASKET1"], [6, 3, 1, -1], self.state)
-        if fv < -100:
-            for i in range(6):
-                self.buy_one()
-        if fv > 100:
-            for i in range(6):
-                self.buy_one()
-        
-        '''
-        fv2 = arbitrage(["CROISSANTS", "JAMS", "PICNIC_BASKET2"], [4, 2, -1], self.state)
-        if fv2 < -150:
-            for i in range(4):
-                self.buy_one()
-        if fv2 > 150:
-            for i in range(4):
-                self.sell_one()
-        '''
-
-        fvx = self.fair_val()
-        self.market_take(fvx)
-        self.market_make_undercut(fvx, 1)
+        super().strategy(1)
 
 class Jam(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
-
+    
     def strategy(self):
-        fv = arbitrage(["CROISSANTS", "JAMS", "DJEMBES", "PICNIC_BASKET1"], [6, 3, 1, -1], self.state)
-        if fv < -100:
-            for i in range(3):
-                self.buy_one()
-        if fv > 100:
-            for i in range(3):
-                self.buy_one()
-
-        '''
-        fv2 = arbitrage(["CROISSANTS", "JAMS", "PICNIC_BASKET2"], [4, 2, -1], self.state)
-        if fv2 < -150:
-            for i in range(2):
-                self.buy_one()
-        if fv2 > 150:
-            for i in range(2):
-                self.sell_one()
-        '''
-        
-        fvx = self.fair_val()
-        self.market_take(fvx)
-        self.market_make_undercut(fvx, 1)
+        super().strategy(1)
 
 class Djembe(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
-
+    
     def strategy(self):
-        fv = arbitrage(["CROISSANTS", "JAMS", "DJEMBES", "PICNIC_BASKET1"], [6, 3, 1, -1], self.state)
-        if fv < -100:
-            for i in range(1):
-                self.buy_one()
-        if fv > 100:
-            for i in range(1):
-                self.sell_one()
-        
-        fvx = self.fair_val()
-        self.market_take(fvx)
-        self.market_make_undercut(fvx, 1)
+        super().strategy(1)
 
 class Basket1(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
-
+    
     def strategy(self):
-        fv = arbitrage(["CROISSANTS", "JAMS", "DJEMBES", "PICNIC_BASKET1"], [6, 3, 1, -1], self.state)
-        if fv < -100:
-            for i in range(1):
-                self.sell_one()
-        if fv > 100:
-            for i in range(1):
-                self.buy_one()
-        
-        fvx = self.fair_val()
-        self.market_take(fvx)
-        self.market_make_undercut(fvx, 1)
+        super().strategy(1)
         
 class Basket2(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
-
+    
     def strategy(self):
-        ...
-        #self.buy_one()
+        super().strategy(1)
 
 class ArbStrategy():
     def __init__(self, strat: str, arb_prods: List[Product], arb_coefs: List[float], mean: float, std: float, cutoffs: tuple):
