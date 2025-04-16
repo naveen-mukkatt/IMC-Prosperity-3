@@ -17,14 +17,13 @@ if submission == True:
 else:
     # user customizable parameters
     verbose_level = 0
-    log_iter = 10000
+    log_iter = 100000
 
 # verbosity level:
 # 0 - zero output by default (can use for debugging)
 # 1 - log normal operations
 # 2 - print EVERYTHING required for prosperity imc
 # log on timestamps that are multiples of log_iter
-
 
 class Logger:
     def __init__(self) -> None:
@@ -64,8 +63,10 @@ class Logger:
                     )
                 )
             else:
-                print (f"Time: {state.timestamp}")
-                print (self.logs)
+                if self.logs != "":
+                    print (f"Time: {state.timestamp}")
+                    print (self.logs)
+
 
 
         self.logs = ""
@@ -147,9 +148,9 @@ class Logger:
 
 logger = Logger()
 
-def log(string, verbose=1):
+def log(*strings, verbose=1):
     if verbose <= verbose_level:
-        logger.print(string)
+        logger.print(*strings)
 
 class Product():
     def __init__(self, product: str, limit: int, state: TradingState):
@@ -194,17 +195,17 @@ class Product():
     
     def buy(self, price: int, quantity: int, print: bool=False):
         if print:
-            logger.print("Buy Order: ", price, quantity)     
+            log("Buy Order: ", price, quantity)     
         if quantity > self.limit_buy_orders():
-            logger.print("Buy Order: ", price, quantity, " exceeds max buy orders")
+            log("Buy Order: ", price, quantity, " exceeds max buy orders")
         elif quantity > 0 and quantity <= self.limit_buy_orders():
             self.orders.append(Order(self.product, int(price), quantity))
             self.nbuy += quantity
     def sell(self, price: int, quantity: int, print: bool=False):
         if print:
-            logger.print("Sell Order: ", price, quantity)
+            log("Sell Order: ", price, quantity)
         if quantity > self.limit_sell_orders():
-            logger.print("Sell Order: ", price, quantity, " exceeds max sell orders")
+            log("Sell Order: ", price, quantity, " exceeds max sell orders")
         elif quantity > 0 and quantity <= self.limit_sell_orders():
             self.orders.append(Order(self.product, int(price), -quantity))
             self.nsell += quantity
@@ -304,7 +305,7 @@ class Product():
     
     def fair_val(self):
         if len(self.order_depth.buy_orders) == 0 or len(self.order_depth.sell_orders) == 0:
-            return math.nan
+            return self.hist_mid[-1] if len(self.hist_mid) > 0 else math.nan
         mm_bid_price, mm_bid_qty = max(self.order_depth.buy_orders.items(), key = lambda x: x[1])
         mm_ask_price, mm_ask_qty = max(self.order_depth.sell_orders.items(), key = lambda x: x[1])
         return (mm_bid_price + mm_ask_price)/2
@@ -392,6 +393,8 @@ class Product():
 
     def strategy(self, amt=0):
         fvx = self.fair_val()
+        if fvx == math.nan:
+            return
         self.market_take(fvx)
         self.market_make_undercut(fvx, amt)
 
@@ -568,7 +571,7 @@ class ArbStrategy():
             return -99 # no signal
     
     def arbitrage(self):
-        logger.print("Arbitrage Signal + Z-Score: ", self.strat, self.signal(), self.z_score())
+        log("Arbitrage Signal + Z-Score: ", self.strat, self.signal(), self.z_score())
         sgn = self.signal()
         if sgn == 1:
             # find max short quantity that's safe without overflowing
@@ -579,7 +582,7 @@ class ArbStrategy():
                 if coef != 0
             ])            
             
-            logger.print("Max Short: ", max_short)
+            log("Max Short: ", max_short)
             for prod, coef in zip(self.arb_prods, self.arb_coefs):
                 if coef > 0:
                     prod.full_buy(int(coef * max_short))
@@ -595,7 +598,7 @@ class ArbStrategy():
                 if coef != 0
             ])
 
-            logger.print("Max Long: ", max_long)
+            log("Max Long: ", max_long)
 
             for prod, coef in zip(self.arb_prods, self.arb_coefs):
                 if coef > 0:
@@ -613,7 +616,7 @@ class ArbStrategy():
                 for prod, coef in zip(self.arb_prods, self.arb_coefs)
             ])
 
-            logger.print("Zeroing Position: ", max_pos)
+            log("Zeroing Position: ", max_pos)
 
             for prod, coef in zip(self.arb_prods, self.arb_coefs):
                 if coef * base > 0:
@@ -670,6 +673,7 @@ class BasketArb():
 class Option(Product):
     def __init__(self, symbol: str, limit: int, strike: float, option_type: str, underlying: Product, state: TradingState, C: float, P: float):
         super().__init__(symbol, limit, state)
+
         self.strike = strike
         self.option_type = option_type
         self.underlying = underlying
