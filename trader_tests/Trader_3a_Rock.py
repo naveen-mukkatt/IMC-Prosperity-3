@@ -303,6 +303,8 @@ class Product():
         return self.market_make(mm_buy, mm_sell)
     
     def fair_val(self):
+        if len(self.order_depth.buy_orders) == 0 or len(self.order_depth.sell_orders) == 0:
+            return math.nan
         mm_bid_price, mm_bid_qty = max(self.order_depth.buy_orders.items(), key = lambda x: x[1])
         mm_ask_price, mm_ask_qty = max(self.order_depth.sell_orders.items(), key = lambda x: x[1])
         return (mm_bid_price + mm_ask_price)/2
@@ -666,12 +668,14 @@ class BasketArb():
         return "Arb done"
 
 class Option(Product):
-    def __init__(self, symbol: str, strike: float, option_type: str, underlying: Product, state: TradingState):
-        self.symbol = symbol
+    def __init__(self, symbol: str, limit: int, strike: float, option_type: str, underlying: Product, state: TradingState, C: float, P: float):
+        super().__init__(symbol, limit, state)
         self.strike = strike
         self.option_type = option_type
         self.underlying = underlying
         self.state = state
+        self.C = C # adjust
+        self.P = P # adjust
     
     def volatility(self):
         prices = self.underlying.hist_mm_mid
@@ -684,20 +688,28 @@ class Option(Product):
         else:
             return max(0, self.strike - self.underlying.fair_val())
     
-    def extrinsic_val(self, time_left=0):
-        C = 1 # adjust
-        P = 1 # adjust
+    def extrinsic_val(self):
+        time_left = (1000000 - self.state.timestamp) / 100
         distance = abs(self.underlying.fair_val() - self.strike)
         if distance == 0:
             distance = 0.01
         proximity = 1 / distance
-        return C * self.volatility() * pow(proximity, P) * math.sqrt(time_left)
+        return self.C * self.volatility() * pow(proximity, self.P) * math.sqrt(time_left)
     
     def theo(self):
         return self.intrinsic_val() + self.extrinsic_val()
 
-    def strategy(self):
-        super().strategy()
+    def fair_val(self):
+        if len(self.order_depth.buy_orders) == 0 or len(self.order_depth.sell_orders) == 0:
+            return self.hist_mid[-1] if len(self.hist_mid) > 0 else math.nan
+
+    def strategy(self, amt=0):
+        fvx = self.fair_val()
+        if fvx == math.nan:
+            return
+        self.market_take(fvx)
+        self.market_make_undercut(fvx, amt)
+        
 
 class Rock(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
@@ -707,11 +719,11 @@ class Rock(Product):
         super().strategy(1)
 
 class RockVoucher(Option):
-    def __init__(self, symbol: str, strike: float, option_type: str, underlying: Product, state: TradingState):
-        super().__init__(symbol, strike, option_type, underlying, state)
+    def __init__(self, symbol: str, limit: int, strike: float, option_type: str, underlying: Product, state: TradingState, C: float, P: float):
+        super().__init__(symbol, limit, strike, option_type, underlying, state, C, P)
     
     def strategy(self):
-        super().strategy(1)
+        super().strategy()
 
 def create_products(state: TradingState):
     products = {}
@@ -730,11 +742,13 @@ def create_products(state: TradingState):
                                         products["PICNIC_BASKET1"],
                                         products["PICNIC_BASKET2"])
     products["VOLCANIC_ROCK"] = Rock("VOLCANIC_ROCK", 400, state)
-    products["VOLCANIC_ROCK_VOUCHER_9500"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_9500", 9500, "call", 200, state)
-    products["VOLCANIC_ROCK_VOUCHER_9750"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_9750", 9750, "call", 200, state)
-    products["VOLCANIC_ROCK_VOUCHER_10000"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10000", 10000, "call", 200, state)
-    products["VOLCANIC_ROCK_VOUCHER_10250"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10250", 10250, "call", 200, state)
-    products["VOLCANIC_ROCK_VOUCHER_10500"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10500", 10500, "call", 200, state)
+
+    # CHANGE THESEEEEE, FIX C AND P
+    products["VOLCANIC_ROCK_VOUCHER_9500"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_9500", 200, 9500, "call", products["VOLCANIC_ROCK"], state, 1, 1)
+    products["VOLCANIC_ROCK_VOUCHER_9750"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_9750", 200, 9750, "call", products["VOLCANIC_ROCK"], state, 1, 1)
+    products["VOLCANIC_ROCK_VOUCHER_10000"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10000", 200, 10000, "call", products["VOLCANIC_ROCK"], state, 1, 1)
+    products["VOLCANIC_ROCK_VOUCHER_10250"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10250", 200, 10250, "call", products["VOLCANIC_ROCK"], state, 1, 1)
+    products["VOLCANIC_ROCK_VOUCHER_10500"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10500", 200, 10500, "call", products["VOLCANIC_ROCK"], state, 1, 1)
     return products
 
 class Trader:
