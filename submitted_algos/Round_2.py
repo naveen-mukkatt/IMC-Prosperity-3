@@ -661,8 +661,8 @@ class BasketArb():
             "ARB2": -30,
         }
         std = {
-            "ARB1": 45,
-            "ARB2": 30,
+            "ARB1": 85,
+            "ARB2": 60,
         }
         cutoffs = {
             "ARB1": (0.25, 1.75),
@@ -673,7 +673,7 @@ class BasketArb():
             for strat in strats
         }
         # Execute both
-        for strat in strats:
+        for strat in ["ARB1", "ARB2"]:
             arb_strats[strat].arbitrage()
       
     def execute(self):
