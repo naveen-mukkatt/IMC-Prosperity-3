@@ -373,28 +373,18 @@ class Product():
             if len(self.order_depth.sell_orders) > 0:
                 self.buy(self.best_ask(), 1)
 
-    def buy_amt(self, amount):
-        if self.position < self.limit - amount:
-            for i in range(min(len(self.order_depth.sell_orders), amount)):
-                self.buy(self.best_ask(), 1)
+    def fair_val(self): # Children inherit the default fair_val   
+        mid = self.max_vol_mid()
+        prev_mid = mid
+        if len(self.hist_mm_mid) > 0:
+            prev_mid = self.hist_mm_mid[-1]
 
-    def sell_one(self):
-        if self.position == 0:
-            if len(self.order_depth.buy_orders) > 0:
-                self.sell(self.best_bid(), 1)
-    
-    def sell_amt(self, amount):
-        if self.position > -1 * self.limit + amount:
-            for i in range(min(len(self.order_depth.buy_orders), amount)):
-                self.sell(self.best_bid(), 1)
+        val = mid * 0.9 + prev_mid * 0.1
+        return val
 
-    def fair_val(self):   
-        return self.max_vol_mid()
-
-    def strategy(self, amt=0):
-        fvx = self.fair_val()
-        self.market_take(fvx)
-        self.market_make_undercut(fvx, amt)
+    def strategy(self): # RUNTIME POLYMORPHISM BTW
+        raise NotImplementedError()
+        ...
 
     def execute(self, blank: bool=False): 
         if blank:
@@ -412,7 +402,9 @@ class Resin(Product):
         return 10000
     
     def strategy(self):
-        super().strategy(1)
+        fv = self.fair_val()
+        self.market_take(fv)
+        self.market_make_undercut(fv, 1)
 
 class Kelp(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
@@ -422,7 +414,10 @@ class Kelp(Product):
         return self.max_vol_mid()
 
     def strategy(self):
-        super().strategy(1)
+        fv = self.fair_val()
+        self.market_take(fv)
+        self.market_make_undercut(fv, 1)
+        #self.buy_one()
 
 class MeanReversion(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState, gamma: float, window: int):
@@ -492,37 +487,37 @@ class Ink(BuyLowSellHigh):
 class Croissant(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
-    
+
     def strategy(self):
-        super().strategy(1)
+        ...
 
 class Jam(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
-    
+
     def strategy(self):
-        super().strategy(1)
+        ...
 
 class Djembe(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
-    
-    def strategy(self):
-        super().strategy(1)
 
+    def strategy(self):
+        ...
 class Basket1(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
-    
+
     def strategy(self):
-        super().strategy(1)
+        ...
         
 class Basket2(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
-    
+
     def strategy(self):
-        super().strategy(1)
+        ...
+        #self.buy_one()
 
 class ArbStrategy():
     def __init__(self, strat: str, arb_prods: List[Product], arb_coefs: List[float], mean: float, std: float, cutoffs: tuple):
@@ -666,8 +661,8 @@ class BasketArb():
             "ARB2": -30,
         }
         std = {
-            "ARB1": 45,
-            "ARB2": 30,
+            "ARB1": 85,
+            "ARB2": 60,
         }
         cutoffs = {
             "ARB1": (0.25, 1.75),
@@ -678,7 +673,7 @@ class BasketArb():
             for strat in strats
         }
         # Execute both
-        for strat in strats:
+        for strat in ["ARB1", "ARB2"]:
             arb_strats[strat].arbitrage()
       
     def execute(self):
