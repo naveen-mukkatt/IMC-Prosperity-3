@@ -729,6 +729,10 @@ class RockVoucher(Option):
     def strategy(self):
         super().strategy()
 
+class NonTradableItem:
+    def __init__():
+        ...
+
 def create_products(state: TradingState):
     products = {}
     products["RAINFOREST_RESIN"] = Resin("RAINFOREST_RESIN", 50, state)
