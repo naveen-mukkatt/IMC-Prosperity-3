@@ -1,23 +1,20 @@
 from datamodel import Listing, Observation, Order, OrderDepth, ProsperityEncoder, Symbol, Trade, TradingState
 from typing import List, Any
-import string
-import json
-import math
-import queue
+import string, json, math, queue, statistics
 import numpy as np
 from abc import ABC, abstractmethod
 
 # flag must be set to true before submitting
 submission = True
 
-if submission == True:
+if submission:
     # parameters necessary for submission, do NOT CHANGE
     verbose_level = 2
     log_iter = 1
 else:
     # user customizable parameters
-    verbose_level = 0
-    log_iter = 100000
+    verbose_level = 1
+    log_iter = 1
 
 # verbosity level:
 # 0 - zero output by default (can use for debugging)
@@ -152,6 +149,9 @@ def log(*strings, verbose=1):
     if verbose <= verbose_level:
         logger.print(*strings)
 
+def norm_cdf(x):
+    return 0.5 * (1 + math.erf(x / math.sqrt(2)))
+
 class Product():
     def __init__(self, product: str, limit: int, state: TradingState):
         self.state = state
@@ -195,17 +195,17 @@ class Product():
     
     def buy(self, price: int, quantity: int, print: bool=False):
         if print:
-            log("Buy Order: ", price, quantity)     
+            log("Buy Order: ", price, quantity, verbose=2)     
         if quantity > self.limit_buy_orders():
-            log("Buy Order: ", price, quantity, " exceeds max buy orders")
+            log("Buy Order: ", price, quantity, " exceeds max buy orders", verbose=2)
         elif quantity > 0 and quantity <= self.limit_buy_orders():
             self.orders.append(Order(self.product, int(price), quantity))
             self.nbuy += quantity
     def sell(self, price: int, quantity: int, print: bool=False):
         if print:
-            log("Sell Order: ", price, quantity)
+            log("Sell Order: ", price, quantity, verbose=2)
         if quantity > self.limit_sell_orders():
-            log("Sell Order: ", price, quantity, " exceeds max sell orders")
+            log("Sell Order: ", price, quantity, " exceeds max sell orders", verbose=2)
         elif quantity > 0 and quantity <= self.limit_sell_orders():
             self.orders.append(Order(self.product, int(price), -quantity))
             self.nsell += quantity
@@ -392,11 +392,7 @@ class Product():
                 self.sell(self.best_bid(), 1)
 
     def strategy(self, amt=0):
-        fvx = self.fair_val()
-        if fvx == math.nan:
-            return
-        self.market_take(fvx)
-        self.market_make_undercut(fvx, amt)
+        raise NotImplementedError("Strategy not implemented for this product.")
 
     def execute(self, blank: bool=False): 
         if blank:
@@ -414,14 +410,18 @@ class Resin(Product):
         return 10000
     
     def strategy(self):
-        super().strategy(1)
+        fvx = self.fair_val()
+        self.market_take(fvx)
+        self.market_make_undercut(fvx, 1)
 
 class Kelp(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
 
     def strategy(self):
-        super().strategy(1)
+        fvx = self.fair_val()
+        self.market_take(fvx)
+        self.market_make_undercut(fvx, 1)
 
 class MeanReversion(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState, gamma: float, window: int):
@@ -491,37 +491,37 @@ class Ink(BuyLowSellHigh):
 class Croissant(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
-    
+
     def strategy(self):
-        super().strategy(1)
+        ...
 
 class Jam(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
-    
+
     def strategy(self):
-        super().strategy(1)
+        ...
 
 class Djembe(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
-    
-    def strategy(self):
-        super().strategy(1)
 
+    def strategy(self):
+        ...
 class Basket1(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
-    
+
     def strategy(self):
-        super().strategy(1)
+        ...
         
 class Basket2(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
-    
+
     def strategy(self):
-        super().strategy(1)
+        ...
+        #self.buy_one()
 
 class ArbStrategy():
     def __init__(self, strat: str, arb_prods: List[Product], arb_coefs: List[float], mean: float, std: float, cutoffs: tuple):
@@ -571,52 +571,69 @@ class ArbStrategy():
             return -99 # no signal
     
     def arbitrage(self):
-        log("Arbitrage Signal + Z-Score: ", self.strat, self.signal(), self.z_score())
+        logger.print("Arbitrage Signal + Z-Score: ", self.strat, self.signal(), self.z_score())
         sgn = self.signal()
         if sgn == 1:
             # find max short quantity that's safe without overflowing
             max_short = min([
-                prod.max_buy_orders() // coef if coef > 0
-                else prod.max_sell_orders() // abs(coef)
+                prod.max_sell_orders() // coef if coef > 0
+                else prod.max_buy_orders() // abs(coef)
                 for prod, coef in zip(self.arb_prods, self.arb_coefs)
                 if coef != 0
             ])            
             
-            log("Max Short: ", max_short)
+            logger.print("Max Short: ", max_short)
             for prod, coef in zip(self.arb_prods, self.arb_coefs):
                 if coef > 0:
-                    prod.full_buy(int(coef * max_short))
+                    prod.full_sell(int(coef * max_short))
                 elif coef < 0:
-                    prod.full_sell(int(-coef * max_short))
+                    prod.full_buy(int(-coef * max_short))
         
         elif sgn == -1:
             # find max long quantity that's safe without overflowing
             max_long = min([
-                prod.max_sell_orders() // coef if coef > 0 
-                else prod.max_buy_orders() // abs(coef)
+                prod.max_buy_orders() // coef if coef > 0 
+                else prod.max_sell_orders() // abs(coef)
                 for prod, coef in zip(self.arb_prods, self.arb_coefs)
                 if coef != 0
             ])
 
-            log("Max Long: ", max_long)
+            logger.print("Max Long: ", max_long)
 
             for prod, coef in zip(self.arb_prods, self.arb_coefs):
                 if coef > 0:
-                    prod.full_sell(int(coef * max_long))
+                    prod.full_buy(int(coef * max_long))
                 elif coef < 0:
-                    prod.full_buy(int(-coef * max_long))
+                    prod.full_sell(int(-coef * max_long))
 
         elif sgn == 0:
-            base = -self.arb_prods[-1].active_position() # negative if need to sell, positive if need to buy
+            base = self.arb_prods[-1].active_position() # negative if need to sell, positive if need to buy
+            logger.print(base)
 
-            max_pos = min([
-                prod.max_buy_orders() // abs(coef) if coef * base > 0
-                else prod.max_sell_orders() // abs(coef) if coef * base < 0
-                else 0
-                for prod, coef in zip(self.arb_prods, self.arb_coefs)
-            ])
+            if abs(base) < 10:
+                return
+            
+            max_pos = 10000
+            for prod, coef in zip(self.arb_prods, self.arb_coefs):
+                if coef * base > 0:
+                    test_prod = prod.max_buy_orders() // abs(coef)
+                    logger.print(prod.product, test_prod)
+                    if test_prod < max_pos:
+                        max_pos = test_prod
+                elif coef * base < 0:
+                    test_prod = prod.max_sell_orders() // abs(coef)
+                    logger.print(prod, test_prod)
 
-            log("Zeroing Position: ", max_pos)
+                    if test_prod < max_pos:
+                        max_pos = test_prod
+
+            # max_pos = min([
+            #     prod.max_buy_orders() // abs(coef) if coef * base > 0
+            #     else prod.max_sell_orders() // abs(coef)
+            #     for prod, coef in zip(self.arb_prods, self.arb_coefs)
+            # ])
+
+            logger.print("Zeroing Position: ", max_pos)
 
             for prod, coef in zip(self.arb_prods, self.arb_coefs):
                 if coef * base > 0:
@@ -645,7 +662,7 @@ class BasketArb():
         }
         mean = {
             "ARB1": -48,
-            "ARB2": 30,
+            "ARB2": -30,
         }
         std = {
             "ARB1": 85,
@@ -660,78 +677,125 @@ class BasketArb():
             for strat in strats
         }
         # Execute both
-        for strat in ["ARB1"]:
+        for strat in ["ARB1", "ARB2"]:
             arb_strats[strat].arbitrage()
-        
-        
+      
     def execute(self):
         self.execute_arb()
     
     def getData(self):
         return "Arb done"
-
+    
 class Option(Product):
-    def __init__(self, symbol: str, limit: int, strike: float, option_type: str, underlying: Product, state: TradingState, C: float, P: float):
+    def __init__(self, symbol: str, limit: str, strike: float, underlying: Product, state: TradingState, a: float, b: float, c: float):
         super().__init__(symbol, limit, state)
-
         self.strike = strike
-        self.option_type = option_type
         self.underlying = underlying
         self.state = state
-        self.C = C # adjust
-        self.P = P # adjust
-    
-    def volatility(self):
-        prices = self.underlying.hist_mm_mid
-        log_returns = [math.log(prices[i] / prices[i - 1]) for i in range(1, len(prices)) if prices[i - 1] > 0]
-        return np.std(log_returns)
+        self.window = 100
+        self.a = a
+        self.b = b
+        self.c = c
 
-    def intrinsic_val(self):
-        if self.option_type == "call":
-            return max(0, self.underlying.fair_val() - self.strike)
-        else:
-            return max(0, self.strike - self.underlying.fair_val())
+    def TTE(self):
+        """Returns time to expiration in days (365 trading days, per @debnandy)."""
+        return 5 - (self.state.timestamp / 1000000)  
     
-    def extrinsic_val(self):
-        time_left = (1000000 - self.state.timestamp) / 100
-        distance = abs(self.underlying.fair_val() - self.strike)
-        if distance == 0:
-            distance = 0.01
-        proximity = 1 / distance
-        return self.C * self.volatility() * pow(proximity, self.P) * math.sqrt(time_left)
+    def BSM(self, S, K, T, sigma):
+        """Black-Scholes on European calls."""
+        d1 = (np.log(S / K) + (0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+        d2 = d1 - sigma * np.sqrt(T)
+        return S * norm_cdf(d1) - K * norm_cdf(d2)
     
-    def theo(self):
-        return self.intrinsic_val() + self.extrinsic_val()
+    def iv(self, S, K, T, price, max_iter=1000):
+        """Inverts BSM to find IV given every other parameter."""
+        low = 1e-6
+        high = 5.0 
+        log(price, verbose=0)
 
+        for i in range(max_iter):
+            sigma = (low + high) / 2
+            price_est = self.BSM(S, K, T, sigma)
+            if abs(price - price_est) < 1e-6:
+                return sigma
+            if price_est < price:
+                low = sigma
+            else:
+                high = sigma
+        return -999999999999999 # error
+
+    def moneyness(self, S, K, T):
+        """Calculates moneyness of an option."""
+        return np.log(K / S) / np.sqrt(T)
+
+    def model_iv(self):
+        m = self.moneyness(self.strike, self.underlying.mid_price(), self.TTE())
+        return self.a * m**2 + self.b * m + self.c
+
+    def iv_diff(self):
+        if self.underlying.mid_price() == math.nan:
+            log("MIDPRICE = NAN", verbose=0)
+            return 0.0001
+        v = self.iv(self.underlying.mid_price(), self.strike, self.TTE(), self.mid_price())
+        if v < -100000:
+            log("midprice = nan??", verbose=0)
+            return 0.0001
+        return v - self.model_iv()
+    
     def fair_val(self):
-        if len(self.order_depth.buy_orders) == 0 or len(self.order_depth.sell_orders) == 0:
-            return self.hist_mid[-1] if len(self.hist_mid) > 0 else math.nan
+        """Implements above BSM with appropriate parameters."""
+        S = self.underlying.mid_price()
+        K = self.strike
+        T = self.TTE()
+        sigma = self.model_iv()
+        return self.BSM(S, K, T, sigma)
+    
+    def act(self):
+        ivd = self.iv_diff()
+        fv = self.fair_val()
 
-    def strategy(self, amt=0):
-        fvx = self.fair_val()
-        if fvx == math.nan:
-            return
-        self.market_take(fvx)
-        self.market_make_undercut(fvx, amt)
+        log("IV Diff: ", ivd, " Fair Value: ", fv, " Mid Price: ", self.mid_price(), " Best Bid", self.best_bid(), " Best Ask: ", self.best_ask(), verbose=0)
+        if ivd > 0.0002: # sell signal. Check best_bid.
+            if self.best_bid() > fv:
+                self.sell(self.best_bid(), self.max_sell_orders())
+            else:
+                self.sell(fv, self.max_sell_orders())
+        elif ivd < -0.0002: # buy signal. Check best_ask.
+            if self.best_ask() < fv:
+                self.buy(self.best_ask(), self.max_buy_orders())
+            else:
+                self.buy(fv, self.max_buy_orders())
+        else: 
+            # neutralize
+            if abs(ivd) < 0.00005:
+                if self.position > 0:
+                    self.sell(fv, self.max_sell_orders())
+                elif self.position < 0:
+                    self.buy(fv, self.max_buy_orders())
+    def strategy(self):
+        ...
+    
+    def execute(self):
+        ...  
         
-
 class Rock(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
     
     def strategy(self):
-        super().strategy(1)
-
-class RockVoucher(Option):
-    def __init__(self, symbol: str, limit: int, strike: float, option_type: str, underlying: Product, state: TradingState, C: float, P: float):
-        super().__init__(symbol, limit, strike, option_type, underlying, state, C, P)
-    
-    def strategy(self):
-        super().strategy()
-
-class NonTradableItem:
-    def __init__():
         ...
+
+class BlackScholes():
+    def __init__(self, symbol: str, underlying: Rock, options: List[Option]):
+        self.symbol = symbol
+        self.options = options
+        self.underlying = underlying
+        self.state = underlying.state
+        self.window = 100
+
+    def execute(self):
+        for option in self.options:
+            option.act()
 
 def create_products(state: TradingState):
     products = {}
@@ -750,21 +814,24 @@ def create_products(state: TradingState):
                                         products["PICNIC_BASKET1"],
                                         products["PICNIC_BASKET2"])
     products["VOLCANIC_ROCK"] = Rock("VOLCANIC_ROCK", 400, state)
+    strikes = [9500, 9750, 10000, 10250, 10500]
+    BSM_list = []
+    for strike in strikes:
+        vrv = Option("VOLCANIC_ROCK_VOUCHER_" + str(strike), strike, products["VOLCANIC_ROCK"], state, 4.533411070233317, 0.0029351071136794007, 0.007809293646189443)
+        BSM_list.append(vrv)
 
-    # CHANGE THESEEEEE, FIX C AND P
-    products["VOLCANIC_ROCK_VOUCHER_9500"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_9500", 200, 9500, "call", products["VOLCANIC_ROCK"], state, 1, 1)
-    products["VOLCANIC_ROCK_VOUCHER_9750"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_9750", 200, 9750, "call", products["VOLCANIC_ROCK"], state, 1, 1)
-    products["VOLCANIC_ROCK_VOUCHER_10000"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10000", 200, 10000, "call", products["VOLCANIC_ROCK"], state, 1, 1)
-    products["VOLCANIC_ROCK_VOUCHER_10250"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10250", 200, 10250, "call", products["VOLCANIC_ROCK"], state, 1, 1)
-    products["VOLCANIC_ROCK_VOUCHER_10500"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10500", 200, 10500, "call", products["VOLCANIC_ROCK"], state, 1, 1)
+    products["BSM"] = BlackScholes("BSM", 
+                                    products["VOLCANIC_ROCK"],
+                                    BSM_list)
+
     return products
 
 class Trader:
         
     def run(self, state: TradingState):
         # Only method required. It takes all buy and sell orders for all symbols as an input, and outputs a list of orders to be sent
-        log("traderData: " + state.traderData, 2)
-        log("Observations: " + str(state.observations), 2)
+        log("traderData: " + state.traderData, verbose=2)
+        log("Observations: " + str(state.observations), verbose=2)
 
         result = {}
 
@@ -772,7 +839,7 @@ class Trader:
         product_instances = create_products(state)
 
         for product, instance in product_instances.items():
-            if product in ["RAINFOREST_RESIN", "KELP", "SQUID_INK", "BASKET_ARB"]:
+            if product in ["RAINFOREST_RESIN", "KELP", "SQUID_INK", "BASKET_ARB", "BSM"]:
                 instance.execute()
 
         for product, instance in product_instances.items():   
