@@ -214,8 +214,8 @@ class Product():
         """Buy the orderbook until the quantity of shares are bought. Limited by max_buy_orders."""
         q = quantity
         for price, volume in self.order_depth.sell_orders.items():
-            if volume > 0:
-                buy_vol = min(self.limit_buy_orders(), volume)
+            if volume < 0:
+                buy_vol = min(q, min(self.limit_buy_orders(), -volume))
                 self.buy(price, buy_vol)
                 q -= buy_vol
                 if q <= 0 or self.limit_buy_orders() <= 0:
@@ -225,7 +225,7 @@ class Product():
         q = quantity
         for price, volume in self.order_depth.buy_orders.items():
             if volume > 0:
-                sell_vol = min(self.limit_sell_orders(), volume)
+                sell_vol = min(q, min(self.limit_sell_orders(), volume))
                 self.sell(price, sell_vol)
                 q -= sell_vol
                 if q <= 0 or self.limit_sell_orders() <= 0:
@@ -660,7 +660,7 @@ class BasketArb():
             for strat in strats
         }
         # Execute both
-        for strat in ["ARB1"]:
+        for strat in ["ARB1", "ARB2"]:
             arb_strats[strat].arbitrage()
         
         
