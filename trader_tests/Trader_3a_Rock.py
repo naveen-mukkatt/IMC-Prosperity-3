@@ -687,9 +687,8 @@ class BasketArb():
         return "Arb done"
     
 class Option(Product):
-    def __init__(self, symbol: str, strike: float, underlying: Product, state: TradingState, a: float, b: float, c: float):
-        super().__init__(symbol, 0, state)
-        self.symbol = symbol
+    def __init__(self, symbol: str, limit: str, strike: float, underlying: Product, state: TradingState, a: float, b: float, c: float):
+        super().__init__(symbol, limit, state)
         self.strike = strike
         self.underlying = underlying
         self.state = state
@@ -699,7 +698,7 @@ class Option(Product):
         self.c = c
 
     def TTE(self):
-        """Returns time to expiration in years (365 trading days, per @debnandy)."""
+        """Returns time to expiration in days (365 trading days, per @debnandy)."""
         return 5 - (self.state.timestamp / 1000000)  
     
     def BSM(self, S, K, T, sigma):
@@ -724,7 +723,7 @@ class Option(Product):
             else:
                 high = sigma
         return -999999999999999 # error
-    
+
     def moneyness(self, S, K, T):
         """Calculates moneyness of an option."""
         return np.log(K / S) / np.sqrt(T)
@@ -773,13 +772,12 @@ class Option(Product):
                     self.sell(fv, self.max_sell_orders())
                 elif self.position < 0:
                     self.buy(fv, self.max_buy_orders())
-
     def strategy(self):
         ...
     
     def execute(self):
         ...  
-
+        
 class Rock(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
@@ -799,10 +797,6 @@ class BlackScholes():
         for option in self.options:
             option.act()
 
-    
-
-    
-
 def create_products(state: TradingState):
     products = {}
     products["RAINFOREST_RESIN"] = Resin("RAINFOREST_RESIN", 50, state)
@@ -820,8 +814,6 @@ def create_products(state: TradingState):
                                         products["PICNIC_BASKET1"],
                                         products["PICNIC_BASKET2"])
     products["VOLCANIC_ROCK"] = Rock("VOLCANIC_ROCK", 400, state)
-
-
     strikes = [9500, 9750, 10000, 10250, 10500]
     BSM_list = []
     for strike in strikes:
@@ -831,6 +823,7 @@ def create_products(state: TradingState):
     products["BSM"] = BlackScholes("BSM", 
                                     products["VOLCANIC_ROCK"],
                                     BSM_list)
+
     return products
 
 class Trader:
