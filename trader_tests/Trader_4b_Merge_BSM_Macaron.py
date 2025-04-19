@@ -834,15 +834,17 @@ def create_products(state: TradingState):
                                         products["PICNIC_BASKET2"])
     products["VOLCANIC_ROCK"] = Rock("VOLCANIC_ROCK", 400, state)
     strikes = [9500, 9750, 10000, 10250, 10500]
+    for strike in strikes:
+        products["VOLCANIC_ROCK_VOUCHER_" + str(strike)] = Option("VOLCANIC_ROCK_VOUCHER_" + str(strike), 
+                                                                    200, 
+                                                                    strike, 
+                                                                    products["VOLCANIC_ROCK"], 
+                                                                    state, 
+                                                                    0.0001, 0.0001, 0.0001)
     products["BSM"] = BlackScholes("BSM", 
                                     products["VOLCANIC_ROCK"],
-                                    [Option("VOLCANIC_ROCK_VOUCHER_" + str(strike),
-                                            200,
-                                            strike,
-                                            products["VOLCANIC_ROCK"], 
-                                            state, 
-                                            4.533411070233317, 0.0029351071136794007, 0.007809293646189443)
-                                    for strike in strikes])
+                                    [products["VOLCANIC_ROCK_VOUCHER_" + str(strike)] for strike in strikes])
+    products["MAGNIFICENT_MACARONS"] = Macaron("MAGNIFICENT_MACARONS", 50, state)
 
     return products
 
