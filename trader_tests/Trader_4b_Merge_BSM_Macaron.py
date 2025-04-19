@@ -12,7 +12,7 @@ if submission:
     log_iter = 1
 else:
     # user customizable parameters
-    verbose_level = 2
+    verbose_level = 0
     log_iter = 1
 
 # verbosity level:
@@ -789,20 +789,25 @@ class Macaron(Product):
         self.market_make_undercut(fvx, 1)
     
     def obtain_position_change(self):
-        # scalars that should be tuned (2 per each of export, import, sugar, sun -- A and B in Ax + B)
-        trade_consts = [0, 0, 0, 0, 0, 0, 0, 0]
+        # scalars, one for each of a leftover const, export, import, sugar, and sun (must be hardcoded)
+        bid_consts = [394.96690819, -54.1238246, -49.90954794, 3.80966583, -2.46172691]
+        ask_consts = [396.50798592, -54.12486522, -49.91003338, 3.80961465, -2.46185596]
 
         sanityCheck = self.state.observations.conversionObservations
         if 'MAGNIFICENT_MACARONS' not in sanityCheck:
-            log("toasty")
-            return
+            raise NotImplementedError("Macarons not found")
 
         # obs: bidPrice, askPrice, transportFees, exportTariff, importTariff, sugarPrice, sunlightIndex
-        obs = self.state.observations.conversionObservations['MAGNIFICENT_MACARONS']
+        obs = sanityCheck['MAGNIFICENT_MACARONS']
         rel_vals = [obs.exportTariff, obs.importTariff, obs.sugarPrice, obs.sunlightIndex]
-        fair_val = 0
-        for i in range(4):
-            fair_val += (rel_vals[i] * trade_consts[2 * i] + trade_consts[2 * i + 1]) # linear contributors
+        
+        # get a fair bid/ask, then take average
+        fair_bid = bid_consts[0]
+        for i in range(1, 5):
+            fair_bid += (rel_vals[i - 1] * bid_consts[i])
+        fair_ask = ask_consts[0]
+        for i in range(1, 5):
+            fair_ask += (rel_vals[i - 1] * ask_consts[i])
         
         # compute when it's good to buy / sell stuff
         effective_bid = obs.askPrice + obs.transportFees + obs.importTariff
@@ -810,16 +815,15 @@ class Macaron(Product):
 
         # there might (?) be scalars for differences between fair_val and effective_bid/ask
         pos_change = 0
-        if fair_val > effective_bid:
-            # good to buy, go long
-            pos_change = min(fair_val - effective_bid, 10)
-        if fair_val < effective_ask:
-            # good to sell, go short
-            pos_change = max(fair_val - effective_ask, -10)
+        # good to buy, go long
+        if fair_bid > effective_bid:
+            pos_change = min((fair_bid - effective_bid) / 15, 10)
+        # good to sell, go short
+        if fair_ask < effective_ask:
+            pos_change = max((fair_ask - effective_ask) / 15, -10)
 
-        self.traderData = self.traderData + str(pos_change) + " " + str(fair_val) + " " + str(effective_bid) + " " + str(effective_ask)
+        log(f"pineapple", pos_change, verbose=0)
         return max(-10, min(10, int(round(pos_change))))
-
 
 def create_products(state: TradingState):
     products = {}
