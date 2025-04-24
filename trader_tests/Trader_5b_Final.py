@@ -13,7 +13,7 @@ if submission:
 else:
     # user customizable parameters
     verbose_level = 0
-    log_iter = 1000
+    log_iter = 1
 
 # verbosity level:
 # 0 - zero output by default (can use for debugging)
@@ -46,7 +46,7 @@ class Logger:
         max_item_length = (self.max_log_length - base_length) // 3
 
         if (state.timestamp % log_iter) == 0:
-            if verbose_level == 2: 
+            if verbose_level == 2: # oh
                 print(
                     self.to_json(
                         [
@@ -716,9 +716,11 @@ class Option(Product):
 
     def iv_diff(self):
         if self.underlying.mid_price() == math.nan:
+            log("MIDPRICE = NAN", verbose=0)
             return 0.0001
         v = self.iv(self.underlying.mid_price(), self.strike, self.TTE(), self.mid_price())
         if v < -100000:
+            log("midprice = nan??", verbose=0)
             return 0.0001
         return v - self.model_iv()
     
@@ -734,7 +736,7 @@ class Option(Product):
         ivd = self.iv_diff()
         fv = self.fair_val()
 
-        #log(f"IV Diff: {ivd:.4f}, Fair Value: {fv}, Mid Price: {self.mid_price()}, Best Bid/Ask: {self.best_bid()}/{self.best_ask()}", verbose=0)
+        log(f"IV Diff: {ivd:.4f}, Fair Value: {fv}, Mid Price: {self.mid_price()}, Best Bid/Ask: {self.best_bid()}/{self.best_ask()}", verbose=0)
         if ivd > 0.0002: # sell signal. Check best_bid.
             if self.best_bid() > fv:
                 self.sell(self.best_bid(), self.max_sell_orders())
@@ -776,16 +778,30 @@ class BlackScholes():
     def execute(self):
         for option in self.options:
             option.act()
+    
+    def set(self, a: float, b: float, c: float):
+        self.a = a
+        self.b = b
+        self.c = c
+    
 
 class Macaron(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
         
     def strategy(self):
-        pass
-        #fvx = self.fair_val()
-        #self.market_take(fvx)
-        #self.market_make_undercut(fvx, 1)
+        '''
+        if self.timestamp % 100000 >= 50000:
+            # neutralize position
+            if self.position > 0:
+                self.sell(self.best_bid(), self.max_sell_orders())
+            elif self.position < 0:
+                self.buy(self.best_ask(), self.max_buy_orders())
+            return
+        fvx = self.fair_val()
+        self.market_take(fvx)
+        self.market_make_undercut(fvx, 1)
+        '''
     
     def obtain_position_change(self):
         # scalars, one for each of a leftover const, export, import, sugar, and sun (must be hardcoded)
@@ -795,6 +811,7 @@ class Macaron(Product):
         # EDIT: no more sun const
         bid_consts = [-209.23454504,  -44.54337459,  -53.4372736,     5.58035525]
         ask_consts = [-207.72514238,  -44.54391297,  -53.43794399,    5.58039689]
+
         sanityCheck = self.state.observations.conversionObservations
         if 'MAGNIFICENT_MACARONS' not in sanityCheck:
             raise NotImplementedError("Macarons not found")
@@ -824,9 +841,8 @@ class Macaron(Product):
         if fair_ask < effective_ask:
             pos_change = max((fair_ask - effective_ask) / 20, -10)
 
-        #log(f"pineapple", pos_change, verbose=0)
-        return 0
-        #return max(-10, min(10, int(round(pos_change))))
+        log(f"pineapple", pos_change, verbose=0)
+        return max(-10, min(10, int(round(pos_change))))
 
 def create_products(state: TradingState):
     products = {}
@@ -845,14 +861,23 @@ def create_products(state: TradingState):
                                         products["PICNIC_BASKET1"],
                                         products["PICNIC_BASKET2"])
     products["VOLCANIC_ROCK"] = Rock("VOLCANIC_ROCK", 400, state)
+
+    # results: 10000+ did really well, <10000 did poorly
+    # attempt to fix 9500: replace w/ linear, old quad reg coefs are 10.682835579643296, 0.2047595799392079, 0.008442907621143343
+    # attempt to fix 9750: replace w/ linear, old quad reg coefs are 7.056634273494265, 0.07638789286626119, 0.007076283331462399
     strikes = [9500, 9750, 10000, 10250, 10500]
-    for strike in strikes:
+    a_vals = [0,             7.056634273494265,   6.832028463197638,    8.982462476532996,     11.77949903261138700]
+    b_vals = [-0.384615385,  0.07638789286626119,  0.018462235021962023, -0.055395851731237324, -0.15030411355246132]
+    c_vals = [0.00123076923, 0.007076283331462399, 0.006543096422534108, 0.006645276393671238,  0.007322300217769431]
+
+    for l in range(len(strikes)):
+        strike = strikes[l]
         products["VOLCANIC_ROCK_VOUCHER_" + str(strike)] = Option("VOLCANIC_ROCK_VOUCHER_" + str(strike), 
                                                                     200, 
                                                                     strike, 
                                                                     products["VOLCANIC_ROCK"], 
                                                                     state, 
-                                                                    0.0001, 0.0001, 0.0001)
+                                                                    a_vals[l], b_vals[l], c_vals[l])
     products["BSM"] = BlackScholes("BSM", 
                                     products["VOLCANIC_ROCK"],
                                     [products["VOLCANIC_ROCK_VOUCHER_" + str(strike)] for strike in strikes])
@@ -884,7 +909,6 @@ class Trader:
 
         # NOW we figure out conversion stuff
         conversions = product_instances["MAGNIFICENT_MACARONS"].obtain_position_change()
-        log(f"Conversions: {conversions}", verbose=0)
         logger.flush(state, result, conversions, traderData)
 
-        return result, conversions, traderData
+        return result, 0, traderData # actually nope

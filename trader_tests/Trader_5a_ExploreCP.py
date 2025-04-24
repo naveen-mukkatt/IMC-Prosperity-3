@@ -1,10 +1,10 @@
-from datamodel import Listing, Observation, Order, OrderDepth, ProsperityEncoder, Symbol, Trade, TradingState
+from datamodel import Listing, Observation, Order, OrderDepth, OwnTrade, ProsperityEncoder, Symbol, Trade, TradingState 
 from typing import List, Any
 import string, json, math, queue, statistics
 import numpy as np
 
 # flag must be set to true before submitting
-submission = True
+submission = False
 
 if submission:
     # parameters necessary for submission, do NOT CHANGE
@@ -13,7 +13,7 @@ if submission:
 else:
     # user customizable parameters
     verbose_level = 0
-    log_iter = 1000
+    log_iter = 1
 
 # verbosity level:
 # 0 - zero output by default (can use for debugging)
@@ -46,7 +46,7 @@ class Logger:
         max_item_length = (self.max_log_length - base_length) // 3
 
         if (state.timestamp % log_iter) == 0:
-            if verbose_level == 2: 
+            if verbose_level == 2: # oh
                 print(
                     self.to_json(
                         [
@@ -391,6 +391,15 @@ class Product():
     def getData(self):
         return self.return_mids()
 
+    # ADDED after R5
+    def getCounterParty(self):
+        if self.product not in self.own_trades:
+            return
+        cp = self.own_trades[self.product][-1].counter_party
+        log(cp)
+        return cp
+
+
 class Resin(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
@@ -716,9 +725,11 @@ class Option(Product):
 
     def iv_diff(self):
         if self.underlying.mid_price() == math.nan:
+            log("MIDPRICE = NAN", verbose=0)
             return 0.0001
         v = self.iv(self.underlying.mid_price(), self.strike, self.TTE(), self.mid_price())
         if v < -100000:
+            log("midprice = nan??", verbose=0)
             return 0.0001
         return v - self.model_iv()
     
@@ -734,7 +745,7 @@ class Option(Product):
         ivd = self.iv_diff()
         fv = self.fair_val()
 
-        #log(f"IV Diff: {ivd:.4f}, Fair Value: {fv}, Mid Price: {self.mid_price()}, Best Bid/Ask: {self.best_bid()}/{self.best_ask()}", verbose=0)
+        log(f"IV Diff: {ivd:.4f}, Fair Value: {fv}, Mid Price: {self.mid_price()}, Best Bid/Ask: {self.best_bid()}/{self.best_ask()}", verbose=0)
         if ivd > 0.0002: # sell signal. Check best_bid.
             if self.best_bid() > fv:
                 self.sell(self.best_bid(), self.max_sell_orders())
@@ -782,10 +793,9 @@ class Macaron(Product):
         super().__init__(symbol, limit, state)
         
     def strategy(self):
-        pass
-        #fvx = self.fair_val()
-        #self.market_take(fvx)
-        #self.market_make_undercut(fvx, 1)
+        fvx = self.fair_val()
+        self.market_take(fvx)
+        self.market_make_undercut(fvx, 1)
     
     def obtain_position_change(self):
         # scalars, one for each of a leftover const, export, import, sugar, and sun (must be hardcoded)
@@ -795,6 +805,7 @@ class Macaron(Product):
         # EDIT: no more sun const
         bid_consts = [-209.23454504,  -44.54337459,  -53.4372736,     5.58035525]
         ask_consts = [-207.72514238,  -44.54391297,  -53.43794399,    5.58039689]
+
         sanityCheck = self.state.observations.conversionObservations
         if 'MAGNIFICENT_MACARONS' not in sanityCheck:
             raise NotImplementedError("Macarons not found")
@@ -824,9 +835,8 @@ class Macaron(Product):
         if fair_ask < effective_ask:
             pos_change = max((fair_ask - effective_ask) / 20, -10)
 
-        #log(f"pineapple", pos_change, verbose=0)
-        return 0
-        #return max(-10, min(10, int(round(pos_change))))
+        log(f"pineapple", pos_change, verbose=0)
+        return max(-10, min(10, int(round(pos_change))))
 
 def create_products(state: TradingState):
     products = {}
@@ -852,7 +862,7 @@ def create_products(state: TradingState):
                                                                     strike, 
                                                                     products["VOLCANIC_ROCK"], 
                                                                     state, 
-                                                                    0.0001, 0.0001, 0.0001)
+                                                                    6.130151739791416, 0.010827773842455821, 0.006437758356692682)
     products["BSM"] = BlackScholes("BSM", 
                                     products["VOLCANIC_ROCK"],
                                     [products["VOLCANIC_ROCK_VOUCHER_" + str(strike)] for strike in strikes])
@@ -875,6 +885,8 @@ class Trader:
         for product, instance in product_instances.items():
             if product in ["RAINFOREST_RESIN", "KELP", "SQUID_INK", "BASKET_ARB", "BSM", "MAGNIFICENT_MACARONS"]:
                 instance.execute()
+            if product in ["RAINFOREST_RESIN", "KELP", "SQUID_INK", "MAGNIFICENT_MACARONS"]:
+                instance.getCounterParty()
 
         for product, instance in product_instances.items():   
             # check if instance is instance of Product
@@ -884,7 +896,6 @@ class Trader:
 
         # NOW we figure out conversion stuff
         conversions = product_instances["MAGNIFICENT_MACARONS"].obtain_position_change()
-        log(f"Conversions: {conversions}", verbose=0)
         logger.flush(state, result, conversions, traderData)
 
         return result, conversions, traderData
