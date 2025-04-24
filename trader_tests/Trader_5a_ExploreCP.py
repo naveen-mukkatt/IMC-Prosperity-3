@@ -1,4 +1,4 @@
-from datamodel import Listing, Observation, Order, OrderDepth, ProsperityEncoder, Symbol, Trade, TradingState
+from datamodel import Listing, Observation, Order, OrderDepth, OwnTrade, ProsperityEncoder, Symbol, Trade, TradingState 
 from typing import List, Any
 import string, json, math, queue, statistics
 import numpy as np
@@ -390,6 +390,15 @@ class Product():
     
     def getData(self):
         return self.return_mids()
+
+    # ADDED after R5
+    def getCounterParty(self):
+        if self.product not in self.own_trades:
+            return
+        cp = self.own_trades[self.product][-1].counter_party
+        log(cp)
+        return cp
+
 
 class Resin(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
@@ -853,7 +862,7 @@ def create_products(state: TradingState):
                                                                     strike, 
                                                                     products["VOLCANIC_ROCK"], 
                                                                     state, 
-                                                                    0.0001, 0.0001, 0.0001)
+                                                                    6.130151739791416, 0.010827773842455821, 0.006437758356692682)
     products["BSM"] = BlackScholes("BSM", 
                                     products["VOLCANIC_ROCK"],
                                     [products["VOLCANIC_ROCK_VOUCHER_" + str(strike)] for strike in strikes])
@@ -876,6 +885,8 @@ class Trader:
         for product, instance in product_instances.items():
             if product in ["RAINFOREST_RESIN", "KELP", "SQUID_INK", "BASKET_ARB", "BSM", "MAGNIFICENT_MACARONS"]:
                 instance.execute()
+            if product in ["RAINFOREST_RESIN", "KELP", "SQUID_INK", "MAGNIFICENT_MACARONS"]:
+                instance.getCounterParty()
 
         for product, instance in product_instances.items():   
             # check if instance is instance of Product

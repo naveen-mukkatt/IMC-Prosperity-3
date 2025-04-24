@@ -54,6 +54,12 @@ class Order:
     def __repr__(self) -> str:
         return "(" + self.symbol + ", " + str(self.price) + ", " + str(self.quantity) + ")"
     
+class OwnTrade:
+    def __init__(self, symbol: Symbol, price: int, quantity: int, counter_party: UserId = None) -> None:
+        self.symbol = symbol
+        self.price: int = price
+        self.quantity: int = quantity
+        self.counter_party = counter_party
 
 class OrderDepth:
 
@@ -86,8 +92,8 @@ class TradingState(object):
                  timestamp: Time,
                  listings: Dict[Symbol, Listing],
                  order_depths: Dict[Symbol, OrderDepth],
-                 own_trades: Dict[Symbol, List[Trade]],
-                 market_trades: Dict[Symbol, List[Trade]],
+                 own_trades: Dict[Symbol, List[OwnTrade]], # original: Dict[Symbol, List[Trade]
+                 market_trades: Dict[Symbol, List[OwnTrade]], # original: Dict[Symbol, List[Trade]
                  position: Dict[Product, Position],
                  observations: Observation):
         self.traderData = traderData

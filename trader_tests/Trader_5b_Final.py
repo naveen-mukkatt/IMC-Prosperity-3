@@ -4,7 +4,7 @@ import string, json, math, queue, statistics
 import numpy as np
 
 # flag must be set to true before submitting
-submission = False
+submission = True
 
 if submission:
     # parameters necessary for submission, do NOT CHANGE
@@ -778,15 +778,30 @@ class BlackScholes():
     def execute(self):
         for option in self.options:
             option.act()
+    
+    def set(self, a: float, b: float, c: float):
+        self.a = a
+        self.b = b
+        self.c = c
+    
 
 class Macaron(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
         
     def strategy(self):
+        '''
+        if self.timestamp % 100000 >= 50000:
+            # neutralize position
+            if self.position > 0:
+                self.sell(self.best_bid(), self.max_sell_orders())
+            elif self.position < 0:
+                self.buy(self.best_ask(), self.max_buy_orders())
+            return
         fvx = self.fair_val()
         self.market_take(fvx)
         self.market_make_undercut(fvx, 1)
+        '''
     
     def obtain_position_change(self):
         # scalars, one for each of a leftover const, export, import, sugar, and sun (must be hardcoded)
@@ -846,14 +861,23 @@ def create_products(state: TradingState):
                                         products["PICNIC_BASKET1"],
                                         products["PICNIC_BASKET2"])
     products["VOLCANIC_ROCK"] = Rock("VOLCANIC_ROCK", 400, state)
+
+    # results: 10000+ did really well, <10000 did poorly
+    # attempt to fix 9500: replace w/ linear, old quad reg coefs are 10.682835579643296, 0.2047595799392079, 0.008442907621143343
+    # attempt to fix 9750: replace w/ linear, old quad reg coefs are 7.056634273494265, 0.07638789286626119, 0.007076283331462399
     strikes = [9500, 9750, 10000, 10250, 10500]
-    for strike in strikes:
+    a_vals = [0,             7.056634273494265,   6.832028463197638,    8.982462476532996,     11.77949903261138700]
+    b_vals = [-0.384615385,  0.07638789286626119,  0.018462235021962023, -0.055395851731237324, -0.15030411355246132]
+    c_vals = [0.00123076923, 0.007076283331462399, 0.006543096422534108, 0.006645276393671238,  0.007322300217769431]
+
+    for l in range(len(strikes)):
+        strike = strikes[l]
         products["VOLCANIC_ROCK_VOUCHER_" + str(strike)] = Option("VOLCANIC_ROCK_VOUCHER_" + str(strike), 
                                                                     200, 
                                                                     strike, 
                                                                     products["VOLCANIC_ROCK"], 
                                                                     state, 
-                                                                    0.0001, 0.0001, 0.0001)
+                                                                    a_vals[l], b_vals[l], c_vals[l])
     products["BSM"] = BlackScholes("BSM", 
                                     products["VOLCANIC_ROCK"],
                                     [products["VOLCANIC_ROCK_VOUCHER_" + str(strike)] for strike in strikes])
@@ -887,4 +911,4 @@ class Trader:
         conversions = product_instances["MAGNIFICENT_MACARONS"].obtain_position_change()
         logger.flush(state, result, conversions, traderData)
 
-        return result, conversions, traderData
+        return result, 0, traderData # actually nope
